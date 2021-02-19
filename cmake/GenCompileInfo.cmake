@@ -12,6 +12,7 @@ function(generate_compile_info)
             "WITH_CURL=${WITH_CURL}"
             "WITH_INOTIFY=${WITH_INOTIFY}"
             "WITH_JS=${WITH_JS}"
+            "WITH_PY=${WITH_PY}"
             "WITH_TAGLIB=${WITH_TAGLIB}"
             "WITH_AVCODEC=${WITH_AVCODEC}"
             "WITH_FFMPEGTHUMBNAILER=${WITH_FFMPEGTHUMBNAILER}"

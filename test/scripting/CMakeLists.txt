@@ -9,6 +9,8 @@ add_executable(testscripting
     test_external_m3u_playlist.cc
     test_external_pls_playlist.cc
     test_import_script.cc
+    test_py_runtime.h
+    test_py_runtime.cc
     test_import_struct_script.cc
     test_internal_m3u_playlist.cc
     test_internal_pls_playlist.cc
@@ -20,6 +22,7 @@ target_link_libraries(testscripting PRIVATE
     GTest::GTest
 )
 target_compile_definitions(testscripting PRIVATE SCRIPTS_DIR="${CMAKE_SOURCE_DIR}/scripts")
+target_compile_options(testscripting PRIVATE -Wall -fvisibility=hidden)
 
 include(GoogleTest)
 gtest_discover_tests(testscripting)

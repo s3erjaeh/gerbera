@@ -314,7 +314,7 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
     std::make_shared<ConfigBoolSetup>(CFG_IMPORT_LAYOUT_PARENT_PATH,
         "/import/layout/attribute::parent-path", "config-import.html#layout",
         DEFAULT_IMPORT_LAYOUT_PARENT_PATH),
-#ifdef HAVE_JS
+#if defined(HAVE_JS) || defined(HAVE_PY)
     std::make_shared<ConfigStringSetup>(CFG_IMPORT_SCRIPTING_CHARSET,
         "/import/scripting/attribute::script-charset", "config-import.html#scripting",
         DEFAULT_JS_CHARSET),
@@ -329,7 +329,7 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
         DEFAULT_PLAYLIST_CREATE_LINK),
     std::make_shared<ConfigStringSetup>(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT,
         "/import/scripting/virtual-layout/import-script", "config-import.html#scripting"),
-#endif // JS
+#endif // PY
     std::make_shared<ConfigStringSetup>(CFG_IMPORT_FILESYSTEM_CHARSET,
         "/import/filesystem-charset", "config-import.html#filesystem-charset",
         DEFAULT_FILESYSTEM_CHARSET),
@@ -342,7 +342,7 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
     std::make_shared<ConfigEnumSetup<std::string>>(CFG_IMPORT_SCRIPTING_VIRTUAL_LAYOUT_TYPE,
         "/import/scripting/virtual-layout/attribute::type", "config-import.html#scripting",
         DEFAULT_LAYOUT_TYPE,
-        std::map<std::string, std::string>({ { "js", "js" }, { "builtin", "builtin" }, { "disabled", "disabled" } })),
+        std::map<std::string, std::string>({ { "py", "py" } ,{ "js", "js" }, { "builtin", "builtin" }, { "disabled", "disabled" } })),
 
     std::make_shared<ConfigBoolSetup>(CFG_TRANSCODING_TRANSCODING_ENABLED,
         "/transcoding/attribute::enabled", "config-transcode.html#transcoding",
@@ -1106,7 +1106,7 @@ void ConfigManager::load(const fs::path& userHome)
             + temp + "\" but no URL is specified");
     }
 
-#ifdef HAVE_JS
+#if defined(HAVE_JS) || defined(HAVE_PY)
     co = findConfigSetup(CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT);
     co->setDefaultValue(dataDir / DEFAULT_JS_DIR / DEFAULT_PLAYLISTS_SCRIPT);
     co->makeOption(root, self);
@@ -1125,9 +1125,16 @@ void ConfigManager::load(const fs::path& userHome)
         throw std::runtime_error("Gerbera was compiled without JS support, "
                                  "however you specified \"js\" to be used for the "
                                  "virtual-layout.");
-#else
+#endif
+#ifndef HAVE_PY
+    if (layoutType == "py")
+        throw std::runtime_error("Gerbera was compiled without PY support, "
+                                 "however you specified \"py\" to be used for the "
+                                 "virtual-layout.");
+#endif
+#if defined(HAVE_PY) || defined(HAVE_JS)
     charset = setOption(root, CFG_IMPORT_SCRIPTING_CHARSET)->getOption();
-    if (layoutType == "js") {
+    if (layoutType == "js" || layoutType == "py") {
         try {
             auto conv = std::make_unique<StringConverter>(charset,
                 DEFAULT_INTERNAL_CHARSET);

@@ -44,7 +44,7 @@ Gerbera uses [CMake].
 git clone https://github.com/gerbera/gerbera.git
 mkdir build
 cd build
-cmake ../gerbera -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 \
+cmake ../gerbera -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_PY=1 \
 -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 -DWITH_FFMPEGTHUMBNAILER=1 -DWITH_EXIF=1 -DWITH_LASTFM=1
 make -j4
 sudo make install
@@ -97,6 +97,7 @@ The Gerbera Team maintains a Homebrew Tap to allow for easy installation of Gerb
 | zlib          |        	| Required  	|                            |                     |          |
 | fmtlib        |        	| Required  	|                            |                     |          |
 | spdlog        |        	| Required  	|                            |                     |          |
+| pybind11    	| 2.1.0   	| Optional  	| Scripting Support    	     | WITH_PY             | Enabled  |
 | duktape      	| 2.1.0   	| Optional  	| Scripting Support    	     | WITH_JS             | Enabled  |
 | mysql        	|         	| Optional  	| Alternate database storage | WITH_MYSQL          | Disabled |
 | curl         	|         	| Optional  	| Enables web services 	     | WITH_CURL           | Enabled  |

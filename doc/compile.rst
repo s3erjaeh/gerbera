@@ -36,6 +36,8 @@ In order to compile Gerbera you will have to install the following packages:
 +-------------------+-----------+---------------+----------------------------+------------------------+----------+
 | duktape           |           | Optional      | Scripting Support          | WITH_JS                | Enabled  |
 +-------------------+-----------+---------------+----------------------------+------------------------+----------+
+| pybind11          |           | Optional      | Scripting Support          | WITH_PY                | Enabled  |
++-------------------+-----------+---------------+----------------------------+------------------------+----------+
 | mysql             |           | Optional      | Alternate database storage | WITH_MYSQL             | Disabled |
 +-------------------+-----------+---------------+----------------------------+------------------------+----------+
 | curl              |           | Optional      | Enables web services       | WITH_CURL              | Enabled  |
@@ -67,7 +69,7 @@ Quick Start Build
   git clone https://github.com/gerbera/gerbera.git
   mkdir build
   cd build
-  cmake ../gerbera -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 \
+  cmake ../gerbera -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_PY=1 \
   -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 -DWITH_FFMPEGTHUMBNAILER=1 -DWITH_EXIF=1 -DWITH_LASTFM=1
   make -j4
   sudo make install
@@ -200,7 +202,7 @@ Now it's time to get the source of gerbera and compile it.
   git clone https://github.com/gerbera/gerbera.git
   mkdir build
   cd build
-  cmake -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 -DWITH_EXIF=1 -DWITH_LASTFM=0 -DWITH_SYSTEMD=1 ../gerbera
+  cmake -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_PY=1 -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 -DWITH_EXIF=1 -DWITH_LASTFM=0 -DWITH_SYSTEMD=1 ../gerbera
   make 
   sudo make install
 
@@ -228,7 +230,7 @@ Build On FreeBSD
   cd build
   sh ../gerbera/scripts/install-pupnp18.sh
   sh ../gerbera/scripts/install-duktape.sh
-  cmake ../gerbera -DWITH_MAGIC=1 -DWITH_MYSQL=0 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 \
+  cmake ../gerbera -DWITH_MAGIC=1 -DWITH_MYSQL=0 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_PY=1 -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 \
   -DWITH_EXIF=1 -DWITH_LASTFM=0 -DWITH_SYSTEMD=0
   make -j4
   sudo make install

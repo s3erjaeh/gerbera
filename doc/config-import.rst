@@ -101,7 +101,7 @@ Below are the available scripting options:
 
         ::
 
-            type="builtin|js|disabled"
+            type="builtin|js|py|disabled"
 
         * Optional
         * Default: **builtin**
@@ -110,6 +110,7 @@ Below are the available scripting options:
 
         -  **builtin**: a default layout will be created by the server
         -  **js**: a user customizable javascript will be used (Gerbera must be compiled with js support)
+        -  **py**: a user customizable python script will be used (Gerbera must be compiled with py support)
         -  **disabled**: only PC-Directory structure will be created, i.e. no virtual layout
 
         The virtual layout can be adjusted using an import script which is defined as follows:

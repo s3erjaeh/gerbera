@@ -56,6 +56,9 @@
 #ifdef HAVE_JS
 #include "layout/js_layout.h"
 #endif
+#ifdef HAVE_PY
+#include "layout/py_layout.h"
+#endif
 
 #ifdef HAVE_LASTFMLIB
 #include "onlineservice/lastfm_scrobbler.h"
@@ -122,7 +125,7 @@ ContentManager::ContentManager(const std::shared_ptr<Context>& context,
 #ifdef HAVE_LASTFMLIB
     last_fm = std::make_shared<LastFm>(context);
 #endif
-
+    log_debug("Scripting runtime initialized");
     database->updateAutoscanList(ScanMode::Timed, config_timed_list);
     autoscan_timed = database->getAutoscanList(ScanMode::Timed);
 }
@@ -166,7 +169,7 @@ void ContentManager::run()
 #endif
 
     std::string layout_type = config->getOption(CFG_IMPORT_SCRIPTING_VIRTUAL_LAYOUT_TYPE);
-    if ((layout_type == "builtin") || (layout_type == "js"))
+    if ((layout_type == "builtin") || (layout_type == "js") || (layout_type == "py"))
         layout_enabled = true;
 
 #ifdef ONLINE_SERVICES
@@ -461,7 +464,7 @@ std::shared_ptr<CdsObject> ContentManager::createSingleItem(const fs::path& path
 #ifdef HAVE_JS
             if ((playlist_parser_script != nullptr) && (content_type == CONTENT_TYPE_PLAYLIST))
                 playlist_parser_script->processPlaylistObject(obj, task);
-#else
+ #else
             if (content_type == CONTENT_TYPE_PLAYLIST)
                 log_warning("Playlist {} will not be parsed: Gerbera was compiled without JS support!", obj->getLocation().c_str());
 #endif // JS
@@ -485,6 +488,8 @@ int ContentManager::_addFile(const fs::path& path, fs::path rootPath, AutoScanSe
 
     if (layout_enabled)
         initLayout();
+
+    log_debug("Layount initialized");
 
 #ifdef HAVE_JS
     initJS();
@@ -1237,6 +1242,13 @@ void ContentManager::initLayout()
 #else
                     log_error("Cannot init layout: Gerbera compiled without JS support, but JS was requested.");
 #endif
+                } else if (layout_type == "py") {
+ #ifdef HAVE_PY
+                    layout = std::make_shared<PyLayout>(self);
+#else
+                    log_error("Cannot init layout: Gerbera compiled without Python support, but Python was requested.");
+#endif
+
                 } else if (layout_type == "builtin") {
                     layout = std::make_shared<BuiltinLayout>(self);
                 }
@@ -1260,7 +1272,6 @@ void ContentManager::initJS()
 }
 
 void ContentManager::destroyJS() { playlist_parser_script = nullptr; }
-
 #endif // HAVE_JS
 
 void ContentManager::destroyLayout()

@@ -337,6 +337,7 @@
                     <xs:restriction base="xs:string">
                         <xs:enumeration value="builtin"/>
                         <xs:enumeration value="js"/>
+						<xs:enumeration value="py"/>
                         <xs:enumeration value="disabled"/>
                     </xs:restriction>
                 </xs:simpleType>

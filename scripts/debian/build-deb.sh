@@ -136,7 +136,7 @@ deb_arch=$(dpkg --print-architecture)
 deb_name="gerbera_${deb_version}_${deb_arch}.deb"
 
 if [[ ! -f $deb_name ]]; then
-  cmake ../ -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 \
+  cmake ../ -DWITH_MAGIC=1 -DWITH_MYSQL=1 -DWITH_CURL=1 -DWITH_JS=1 -DWITH_PY=1 \
       -DWITH_TAGLIB=1 -DWITH_AVCODEC=1 -DWITH_FFMPEGTHUMBNAILER=1 \
       -DWITH_EXIF=1 -DWITH_LASTFM=0 -DWITH_SYSTEMD=1 -DWITH_DEBUG=OFF \
       -DSTATIC_LIBUPNP=ON -DCMAKE_BUILD_TYPE=Release

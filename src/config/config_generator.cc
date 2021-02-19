@@ -254,7 +254,7 @@ void ConfigGenerator::generateImport(const fs::path& prefixDir, const fs::path& 
     }
 #endif
 
-#ifdef HAVE_JS
+#if defined(HAVE_JS) || defined(HAVE_PY)
     setValue(CFG_IMPORT_SCRIPTING_CHARSET);
 
     std::string script;
@@ -267,7 +267,7 @@ void ConfigGenerator::generateImport(const fs::path& prefixDir, const fs::path& 
 
     setValue(CFG_IMPORT_SCRIPTING_VIRTUAL_LAYOUT_TYPE);
 
-#ifdef HAVE_JS
+#if defined(HAVE_JS) || defined(HAVE_PY)
     script = prefixDir / DEFAULT_JS_DIR / DEFAULT_IMPORT_SCRIPT;
     setValue(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT, script);
 #endif

@@ -32,6 +32,7 @@ set(WITH_MYSQL             NO  CACHE BOOL "Store media information in MySQL DB")
 set(WITH_CURL              YES CACHE BOOL "CURL required for online services")
 set(WITH_INOTIFY           YES CACHE BOOL "Enable Inotify file monitoring support")
 set(WITH_JS                YES CACHE BOOL "Enable JavaScript for scripting")
+set(WITH_PY                YES CACHE BOOL "Enable Python for scripting")
 set(WITH_TAGLIB            YES CACHE BOOL "Use TagLib to extract audio file metadata")
 set(WITH_AVCODEC           NO  CACHE BOOL "Use ffmpeg/libav to extract file metadata")
 set(WITH_FFMPEGTHUMBNAILER NO  CACHE BOOL "Enable Thumbnail generation")
@@ -84,6 +85,8 @@ add_library(libgerbera STATIC
         src/content/layout/builtin_layout.h
         src/content/layout/js_layout.cc
         src/content/layout/js_layout.h
+        src/content/layout/py_layout.cc
+        src/content/layout/py_layout.h
         src/content/layout/layout.cc
         src/content/layout/layout.h
         src/content/onlineservice/atrailers_content_handler.cc
@@ -104,6 +107,10 @@ add_library(libgerbera STATIC
         src/content/onlineservice/task_processor.h
         src/content/scripting/import_script.cc
         src/content/scripting/import_script.h
+        src/content/scripting/py_import_script.cc
+        src/content/scripting/py_import_script.h
+        src/content/scripting/py_runtime.cc
+        src/content/scripting/py_runtime.h
         src/content/scripting/js_functions.cc
         src/content/scripting/js_functions.h
         src/content/scripting/playlist_parser_script.cc
@@ -255,7 +262,7 @@ target_link_libraries(gerbera PRIVATE libgerbera)
 
 # Warnings are nice
 target_compile_options(gerbera PRIVATE -Wall)
-target_compile_options(libgerbera PRIVATE -Wall)
+target_compile_options(libgerbera PRIVATE -Wall  -fvisibility=hidden)
 
 # Add the automatically determined parts of the RPATH which point to
 # directories outside the build tree to the install RPATH
@@ -409,6 +416,12 @@ if(WITH_JS)
     find_package(duktape REQUIRED)
     target_link_libraries(libgerbera PUBLIC duktape::duktape)
     target_compile_definitions(libgerbera PUBLIC HAVE_JS)
+endif()
+
+if(WITH_PY)
+    find_package(pybind11 REQUIRED) 
+    target_link_libraries(libgerbera PUBLIC pybind11::embed)
+    target_compile_definitions(libgerbera PUBLIC HAVE_PY)    
 endif()
 
 if(WITH_MYSQL)

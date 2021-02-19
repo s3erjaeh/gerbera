@@ -9,6 +9,7 @@ class GerberaConan(ConanFile):
     generators = ("cmake", "cmake_find_package", "virtualrunenv")
     settings = "os", "arch", "compiler", "build_type"
     options = {
+        "python": [True,False],
         "js": [True, False],
         "debug_logging": [True, False],
         "tests": [True, False],
@@ -21,7 +22,8 @@ class GerberaConan(ConanFile):
         "ffmpeg": [True, False],
         "ffmpegthumbnailer": [True, False],
     }
-    default_options = {
+    default_options = {  
+        "python": True,
         "js": True,
         "debug_logging": False,
         "tests": False,
@@ -46,6 +48,7 @@ class GerberaConan(ConanFile):
         "sqlite3/3.31.1",
         "zlib/1.2.11",
         "pupnp/1.12.1",
+        "pybind11/2.6.1",
     ]
 
     def configure(self):
@@ -181,6 +184,7 @@ class GerberaConan(ConanFile):
 
     def build(self):
         cmake = CMake(self)
+        cmake.definitions["WITH_PY"] = self.options.python
         cmake.definitions["WITH_JS"] = self.options.js
         cmake.definitions["WITH_DEBUG"] = self.options.debug_logging
         cmake.definitions["WITH_TESTS"] = self.options.tests
