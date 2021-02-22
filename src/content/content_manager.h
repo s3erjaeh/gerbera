@@ -52,6 +52,7 @@
 // vice versa
 class PlaylistParserScript;
 #include "scripting/playlist_parser_script.h"
+#else
 class ScriptingRuntime;
 #endif
 
@@ -318,9 +319,7 @@ protected:
 
     std::shared_ptr<Timer> timer;
     std::shared_ptr<TaskProcessor> task_processor;
-#ifdef HAVE_JS
     std::shared_ptr<ScriptingRuntime> scripting_runtime;
-#endif
     std::shared_ptr<LastFm> last_fm;
 
     std::recursive_mutex mutex;

@@ -125,7 +125,6 @@ ContentManager::ContentManager(const std::shared_ptr<Context>& context,
 #ifdef HAVE_LASTFMLIB
     last_fm = std::make_shared<LastFm>(context);
 #endif
-    log_debug("Scripting runtime initialized");
     database->updateAutoscanList(ScanMode::Timed, config_timed_list);
     autoscan_timed = database->getAutoscanList(ScanMode::Timed);
 }
@@ -464,7 +463,7 @@ std::shared_ptr<CdsObject> ContentManager::createSingleItem(const fs::path& path
 #ifdef HAVE_JS
             if ((playlist_parser_script != nullptr) && (content_type == CONTENT_TYPE_PLAYLIST))
                 playlist_parser_script->processPlaylistObject(obj, task);
- #else
+#else
             if (content_type == CONTENT_TYPE_PLAYLIST)
                 log_warning("Playlist {} will not be parsed: Gerbera was compiled without JS support!", obj->getLocation().c_str());
 #endif // JS
@@ -488,8 +487,6 @@ int ContentManager::_addFile(const fs::path& path, fs::path rootPath, AutoScanSe
 
     if (layout_enabled)
         initLayout();
-
-    log_debug("Layount initialized");
 
 #ifdef HAVE_JS
     initJS();
@@ -1272,6 +1269,7 @@ void ContentManager::initJS()
 }
 
 void ContentManager::destroyJS() { playlist_parser_script = nullptr; }
+
 #endif // HAVE_JS
 
 void ContentManager::destroyLayout()
