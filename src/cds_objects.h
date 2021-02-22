@@ -56,8 +56,8 @@ namespace fs = std::filesystem;
 static constexpr bool IS_CDS_CONTAINER(unsigned int type)
 {
     return type & OBJECT_TYPE_CONTAINER;
-};
-static constexpr bool IS_CDS_ITEM_EXTERNAL_URL(unsigned int type) { return type & OBJECT_TYPE_ITEM_EXTERNAL_URL; };
+}
+static constexpr bool IS_CDS_ITEM_EXTERNAL_URL(unsigned int type) { return type & OBJECT_TYPE_ITEM_EXTERNAL_URL; }
 
 #define OBJECT_FLAG_RESTRICTED 0x00000001u
 #define OBJECT_FLAG_SEARCHABLE 0x00000002u
@@ -117,6 +117,9 @@ protected:
     std::map<std::string, std::string> auxdata;
     std::vector<std::shared_ptr<CdsResource>> resources;
 
+    /// \brief reference to parent, transporting details from import script
+    std::shared_ptr<CdsObject> parent;
+
     virtual ~CdsObject() = default;
 
 public:
@@ -147,9 +150,11 @@ public:
 
     /// \brief Set the parent ID of the object.
     void setParentID(int parentID) { this->parentID = parentID; }
+    void setParent(std::shared_ptr<CdsObject>& parent) { this->parent = parent; }
 
     /// \brief Retrieve the objects parent ID.
     int getParentID() const { return parentID; }
+    std::shared_ptr<CdsObject> getParent() const { return parent; }
 
     /// \brief Set the restricted flag.
     void setRestricted(bool restricted) { changeFlag(OBJECT_FLAG_RESTRICTED, restricted); }
@@ -343,11 +348,11 @@ public:
     /// The difference between setting this flag to true or false is following:
     /// exactly=true checks all fields, also internal ones, exactly=false checks
     /// only the fields that will be visible in DIDL-Lite
-    virtual int equals(const std::shared_ptr<CdsObject>& obj, bool exactly = false);
+    virtual bool equals(const std::shared_ptr<CdsObject>& obj, bool exactly = false);
 
     /// \brief Checks if current object has the same resources as obj
     /// \param obj object to check against
-    int resourcesEqual(const std::shared_ptr<CdsObject>& obj);
+    bool resourcesEqual(const std::shared_ptr<CdsObject>& obj);
 
     /// \brief Checks if the minimum required parameters for the object have been set and are valid.
     virtual void validate();
@@ -363,6 +368,10 @@ protected:
     /// \brief mime-type of the media.
     std::string mimeType;
 
+    /// \brief number of part, e.g. disk or season
+    int partNumber;
+
+    /// \brief number of track e.g. track on disk or episode of season
     int trackNumber;
 
     /// \brief unique service ID
@@ -385,6 +394,12 @@ public:
     void setTrackNumber(int trackNumber) { this->trackNumber = trackNumber; }
 
     int getTrackNumber() const { return trackNumber; }
+
+    /// \brief Sets the part number property
+    void setPartNumber(int partNumber) { this->partNumber = partNumber; }
+
+    int getPartNumber() const { return partNumber; }
+
     /// \brief Copies all object properties to another object.
     /// \param obj target object (clone)`
     void copyTo(const std::shared_ptr<CdsObject>& obj) override;
@@ -392,7 +407,7 @@ public:
     /// \brief Checks if current object is equal to obj.
     ///
     /// See description for CdsObject::equals() for details.
-    int equals(const std::shared_ptr<CdsObject>& obj, bool exactly = false) override;
+    bool equals(const std::shared_ptr<CdsObject>& obj, bool exactly = false) override;
 
     /// \brief Checks if the minimum required parameters for the object have been set and are valid.
     void validate() override;
@@ -479,7 +494,7 @@ public:
     /// \brief Checks if current object is equal to obj.
     ///
     /// See description for CdsObject::equals() for details.
-    int equals(const std::shared_ptr<CdsObject>& obj, bool exactly = false) override;
+    bool equals(const std::shared_ptr<CdsObject>& obj, bool exactly = false) override;
 
     /// \brief Checks if the minimum required parameters for the object have been set and are valid.
     void validate() override;

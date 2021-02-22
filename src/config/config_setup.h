@@ -91,8 +91,8 @@ protected:
     }
 
 public:
-    static const char* const ROOT_NAME;
-    static const std::string ATTRIBUTE;
+    static const std::string_view ROOT_NAME;
+    static const std::string_view ATTRIBUTE;
 
     pugi::xpath_node_set getXmlTree(const pugi::xml_node& element) const;
 
@@ -179,11 +179,15 @@ public:
     virtual std::string getCurrentValue() const { return optionValue == nullptr ? "" : optionValue->getOption(); }
 
     template <class CS>
-    static std::shared_ptr<CS> findConfigSetup(config_option_t option)
+    static std::shared_ptr<CS> findConfigSetup(config_option_t option, bool save = false)
     {
-        std::shared_ptr<CS> result = std::dynamic_pointer_cast<CS>(ConfigManager::findConfigSetup(option));
+        std::shared_ptr<ConfigSetup> base = ConfigManager::findConfigSetup(option, save);
+        if (base == nullptr && save)
+            return nullptr;
+
+        std::shared_ptr<CS> result = std::dynamic_pointer_cast<CS>(base);
         if (result == nullptr) {
-            throw std::runtime_error(fmt::format("Error in config code: {} has wrong class", int(option)));
+            throw_std_runtime_error("Error in config code: {} has wrong class", option);
         }
         return result;
     }
@@ -261,11 +265,11 @@ public:
         std::string optValue = ConfigSetup::getXmlContent(root, true);
         log_debug("Config: option: '{}' value: '{}'", xpath, optValue.c_str());
         if (notEmpty && optValue.empty()) {
-            throw std::runtime_error(fmt::format("Error in config file: Invalid {}/{} empty value '{}'", root.path(), xpath, optValue));
+            throw_std_runtime_error("Error in config file: Invalid {}/{} empty value '{}'", root.path(), xpath, optValue);
         }
         En result;
         if (!checkEnumValue(optValue, result)) {
-            throw std::runtime_error(fmt::format("Error in config file: {}/{} unsupported Enum value '{}'", root.path(), xpath, optValue).c_str());
+            throw_std_runtime_error("Error in config file: {}/{} unsupported Enum value '{}'", root.path(), xpath, optValue);
         }
         return result;
     }
@@ -273,11 +277,11 @@ public:
     std::shared_ptr<ConfigOption> newOption(const std::string& optValue)
     {
         if (notEmpty && optValue.empty()) {
-            throw std::runtime_error(fmt::format("Invalid {} empty value '{}'", xpath, optValue));
+            throw_std_runtime_error("Invalid {} empty value '{}'", xpath, optValue);
         }
         En result;
         if (!checkEnumValue(optValue, result)) {
-            throw std::runtime_error(fmt::format("Error in config file: {} unsupported Enum value '{}'", xpath, optValue).c_str());
+            throw_std_runtime_error("Error in config file: {} unsupported Enum value '{}'", xpath, optValue);
         }
         optionValue = std::make_shared<Option>(optValue);
         return optionValue;
@@ -335,14 +339,14 @@ public:
         : ConfigSetup(option, xpath, help)
 
     {
-        this->defaultValue = std::to_string(0);
+        this->defaultValue = fmt::to_string(0);
     }
 
     ConfigIntSetup(config_option_t option, const char* xpath, const char* help, int defaultValue)
         : ConfigSetup(option, xpath, help)
 
     {
-        this->defaultValue = std::to_string(defaultValue);
+        this->defaultValue = fmt::to_string(defaultValue);
     }
 
     ConfigIntSetup(config_option_t option, const char* xpath, const char* help, IntCheckFunction check)
@@ -350,7 +354,7 @@ public:
         , valueCheck(check)
 
     {
-        this->defaultValue = std::to_string(0);
+        this->defaultValue = fmt::to_string(0);
     }
 
     ConfigIntSetup(config_option_t option, const char* xpath, const char* help, int defaultValue, IntCheckFunction check)
@@ -358,7 +362,7 @@ public:
         , valueCheck(check)
 
     {
-        this->defaultValue = std::to_string(defaultValue);
+        this->defaultValue = fmt::to_string(defaultValue);
     }
 
     ConfigIntSetup(config_option_t option, const char* xpath, const char* help, int defaultValue, int minValue, IntMinFunction check)
@@ -366,7 +370,7 @@ public:
         , minCheck(check)
         , minValue(minValue)
     {
-        this->defaultValue = std::to_string(defaultValue);
+        this->defaultValue = fmt::to_string(defaultValue);
     }
 
     ConfigIntSetup(config_option_t option, const char* xpath, const char* help, const char* defaultValue, IntCheckFunction check = nullptr)

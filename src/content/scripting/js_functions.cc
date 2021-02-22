@@ -62,6 +62,50 @@ duk_ret_t js_copyObject(duk_context* ctx)
     return 1;
 }
 
+duk_ret_t js_addContainerTree(duk_context* ctx)
+{
+    auto* self = Script::getContextScript(ctx);
+
+    if (!duk_is_array(ctx, 0)) {
+        log_js("js_addContainerTree: No Array");
+        return 0;
+    }
+
+    std::vector<std::shared_ptr<CdsObject>> result;
+    auto length = duk_get_length(ctx, -1);
+
+    for (duk_size_t i = 0; i < length; i++) {
+        if (duk_get_prop_index(ctx, -1, i)) {
+            if (!duk_is_object(ctx, -1)) {
+                duk_pop(ctx);
+                log_js("js_addContainerTree: no object at {}", i);
+                break;
+            }
+            duk_to_object(ctx, -1);
+            auto cds_obj = self->dukObject2cdsObject(nullptr);
+            if (cds_obj != nullptr) {
+                result.emplace_back(cds_obj);
+            } else {
+                log_js("js_addContainerTree: no CdsObject at {}", i);
+            }
+        }
+        duk_pop(ctx);
+    }
+
+    if (!result.empty()) {
+        auto cm = self->getContent();
+        auto containerId = cm->addContainerTree(result);
+        if (containerId != INVALID_OBJECT_ID) {
+            /* setting last container ID as return value */
+            std::string tmp = fmt::to_string(containerId);
+            duk_push_string(ctx, tmp.c_str());
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 duk_ret_t js_addCdsObject(duk_context* ctx)
 {
     auto* self = Script::getContextScript(ctx);
@@ -142,7 +186,7 @@ duk_ret_t js_addCdsObject(duk_context* ctx)
                 auto mainObj = self->getDatabase()->loadObject(pcd_id);
                 cds_obj = self->dukObject2cdsObject(mainObj);
             } else
-                cds_obj = self->dukObject2cdsObject(self->getProcessedObject());
+                cds_obj = self->dukObject2cdsObject(orig_object);
         } else
             cds_obj = self->dukObject2cdsObject(orig_object);
 
@@ -150,18 +194,16 @@ duk_ret_t js_addCdsObject(duk_context* ctx)
             return 0;
         }
 
-        int parentId;
+        int parentId = stoiString(ts);
 
-        if ((self->whoami() == S_PLAYLIST) && (self->getConfig()->getBoolOption(CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT_LINK_OBJECTS))) {
-            path = p2i->convert(path);
-            parentId = cm->addContainerChain(path, containerclass, orig_object->getID());
-        } else {
-            if (self->whoami() == S_PLAYLIST)
+        if (parentId <= 0) {
+            if ((self->whoami() == S_PLAYLIST) && (self->getConfig()->getBoolOption(CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT_LINK_OBJECTS))) {
                 path = p2i->convert(path);
-            else
-                path = i2i->convert(path);
-
-            parentId = cm->addContainerChain(path, containerclass, INVALID_OBJECT_ID, orig_object);
+                parentId = cm->addContainerChain(path, containerclass, orig_object->getID());
+            } else {
+                path = (self->whoami() == S_PLAYLIST) ? p2i->convert(path) : i2i->convert(path);
+                parentId = cm->addContainerChain(path, containerclass, INVALID_OBJECT_ID, orig_object);
+            }
         }
 
         cds_obj->setParentID(parentId);
@@ -190,7 +232,7 @@ duk_ret_t js_addCdsObject(duk_context* ctx)
         cm->addObject(cds_obj);
 
         /* setting object ID as return value */
-        std::string tmp = std::to_string(parentId);
+        std::string tmp = fmt::to_string(parentId);
         duk_push_string(ctx, tmp.c_str());
         return 1;
     } catch (const ServerShutdownException& se) {

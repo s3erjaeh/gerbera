@@ -48,6 +48,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef __HAIKU__
+#define _DEFAULT_SOURCE
+#endif
+
 #include <ifaddrs.h>
 #include <net/if.h>
 
@@ -61,8 +65,6 @@
 #include <fcntl.h>
 #include <sys/sockio.h>
 #endif
-
-#include <fmt/ostream.h>
 
 #include "cds_objects.h"
 #include "config/config_manager.h"
@@ -175,7 +177,7 @@ time_t getLastWriteTime(const fs::path& path)
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        throw_std_runtime_error(fmt::format("{}: {}", strerror(errno), path.string()));
+        throw_std_runtime_error("{}: {}", std::strerror(errno), path.c_str());
     }
 
     return statbuf.st_mtime;
@@ -188,7 +190,7 @@ bool isRegularFile(const fs::path& path)
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        throw_std_runtime_error(fmt::format("{}: {}", strerror(errno), path.string()));
+        throw_std_runtime_error("{}: {}", std::strerror(errno), path.c_str());
     }
 
     return S_ISREG(statbuf.st_mode);
@@ -222,7 +224,7 @@ off_t getFileSize(const fs::path& path)
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        throw_std_runtime_error(fmt::format("{}: {}", strerror(errno), path.string()));
+        throw_std_runtime_error("{}: {}", std::strerror(errno), path.c_str());
     }
 
     return statbuf.st_size;
@@ -508,7 +510,7 @@ std::string readTextFile(const fs::path& path)
     auto f = ::fopen(path.c_str(), "rt");
 #endif
     if (!f) {
-        throw_std_runtime_error("could not open " + path.string() + " : " + strerror(errno));
+        throw_std_runtime_error("Could not open {}: {}", path.c_str(), std::strerror(errno));
     }
     std::ostringstream buf;
     std::array<char, 1024> buffer;
@@ -528,14 +530,14 @@ void writeTextFile(const fs::path& path, const std::string& contents)
     auto f = ::fopen(path.c_str(), "wt");
 #endif
     if (!f) {
-        throw_std_runtime_error("could not open " + path.string() + " : " + strerror(errno));
+        throw_std_runtime_error("Could not open {}: {}", path.c_str(), std::strerror(errno));
     }
 
     size_t bytesWritten = std::fwrite(contents.c_str(), 1, contents.length(), f);
     if (bytesWritten < contents.length()) {
         fclose(f);
 
-        throw_std_runtime_error("error writing to " + path.string() + " : " + strerror(errno));
+        throw_std_runtime_error("Error writing to {}: {}", path.c_str(), std::strerror(errno));
     }
     fclose(f);
 }
@@ -556,14 +558,14 @@ std::optional<std::vector<std::byte>> readBinaryFile(const fs::path& path)
     // and no line conversion happens (therefore lseek returns result close to file size).
     auto size = fb.pubseekoff(0, std::ios::end);
     if (size < 0)
-        throw_std_runtime_error(fmt::format("Can't determine file size of {}", path));
+        throw_std_runtime_error("Can't determine file size of {}", path.c_str());
 
     fb.pubseekoff(0, std::ios::beg);
 
     std::vector<std::byte> result(size);
     size = fb.sgetn(reinterpret_cast<char*>(result.data()), size);
     if (size < 0 || !file)
-        throw_std_runtime_error(fmt::format("Failed to read from file {}", path));
+        throw_std_runtime_error("Failed to read from file {}", path.c_str());
 
     result.resize(size);
 
@@ -576,20 +578,20 @@ void writeBinaryFile(const fs::path& path, const std::byte* data, std::size_t si
 
     std::ofstream file { path, std::ios::out | std::ios::binary | std::ios::trunc };
     if (!file)
-        throw_std_runtime_error(fmt::format("Failed to open {}", path));
+        throw_std_runtime_error("Failed to open {}", path.c_str());
 
     file.rdbuf()->sputn(reinterpret_cast<const char*>(data), size);
 
     if (!file)
-        throw_std_runtime_error(fmt::format("Failed to write to file {}", path));
+        throw_std_runtime_error("Failed to write to file {}", path.c_str());
 }
 
 std::string renderProtocolInfo(const std::string& mimetype, const std::string& protocol, const std::string& extend)
 {
     if (!mimetype.empty() && !protocol.empty()) {
         if (!extend.empty())
-            return protocol + ":*:" + mimetype + ":" + extend;
-        return protocol + ":*:" + mimetype + ":*";
+            return fmt::format("{}:*:{}:{}", protocol, mimetype, extend);
+        return fmt::format("{}:*:{}:*", protocol, mimetype);
     }
 
     return "http-get:*:*:*";
@@ -607,7 +609,7 @@ std::string getMTFromProtocolInfo(const std::string& protocol)
 std::string getProtocol(const std::string& protocolInfo)
 {
     size_t pos = protocolInfo.find(':');
-    return (pos == std::string::npos || pos == 0) ? "http-get" : protocolInfo.substr(0, pos);
+    return (pos == std::string::npos || pos == 0) ? PROTOCOL : protocolInfo.substr(0, pos);
 }
 
 std::string millisecondsToHMSF(int milliseconds)
@@ -764,8 +766,8 @@ std::string toCSV(const std::shared_ptr<std::unordered_set<int>>& array)
 
 void getTimespecNow(struct timespec* ts)
 {
-    if (timespec_get(ts, TIME_UTC) == 0)
-        throw_std_runtime_error(fmt::format("timespec_get failed: {}", strerror(errno)));
+    if (clock_gettime(CLOCK_REALTIME, ts) != 0)
+        throw_std_runtime_error("clock_gettime failed: {}", std::strerror(errno));
 }
 
 long getDeltaMillis(struct timespec* first)
@@ -811,7 +813,7 @@ std::string ipToInterface(const std::string& ip)
     char host[NI_MAXHOST];
 
     if (getifaddrs(&ifaddr) == -1) {
-        log_error("Could not getifaddrs: {}", strerror(errno));
+        log_error("Could not getifaddrs: {}", std::strerror(errno));
     }
 
     for (ifa = ifaddr, n = 0; ifa != nullptr; ifa = ifa->ifa_next, n++) {
@@ -930,7 +932,7 @@ fs::path tempName(const fs::path& leadPath, char* tmpl)
     }
 
     /* Get some more or less random data.  */
-    timespec_get(&ts, TIME_UTC);
+    clock_gettime(CLOCK_REALTIME, &ts);
     value = (ts.tv_nsec ^ ts.tv_sec) + counter++;
 
     for (count = 0; count < 100; value += 7777, ++count) {
@@ -973,12 +975,12 @@ bool isTheora(const fs::path& ogg_filename)
     auto f = ::fopen(ogg_filename.c_str(), "rb");
 #endif
     if (!f) {
-        throw_std_runtime_error("Error opening " + ogg_filename.string() + " : " + strerror(errno));
+        throw_std_runtime_error("Error opening {}: {}", ogg_filename.c_str(), std::strerror(errno));
     }
 
     if (std::fread(buffer, 1, 4, f) != 4) {
         fclose(f);
-        throw_std_runtime_error("Error reading " + ogg_filename.string());
+        throw_std_runtime_error("Error reading {}", ogg_filename.c_str());
     }
 
     if (memcmp(buffer, "OggS", 4) != 0) {
@@ -988,12 +990,12 @@ bool isTheora(const fs::path& ogg_filename)
 
     if (fseek(f, 28, SEEK_SET) != 0) {
         fclose(f);
-        throw_std_runtime_error("Incomplete file " + ogg_filename.string());
+        throw_std_runtime_error("Incomplete file {}", ogg_filename.c_str());
     }
 
     if (std::fread(buffer, 1, 7, f) != 7) {
         fclose(f);
-        throw_std_runtime_error("Error reading " + ogg_filename.string());
+        throw_std_runtime_error("Error reading {}", ogg_filename.c_str());
     }
 
     if (memcmp(buffer, "\x80theora", 7) != 0) {
@@ -1107,7 +1109,7 @@ std::string getAVIFourCC(const fs::path& avi_filename)
     auto f = ::fopen(avi_filename.c_str(), "rb");
 #endif
     if (!f)
-        throw_std_runtime_error("could not open file " + avi_filename.native() + " : " + strerror(errno));
+        throw_std_runtime_error("Could not open file {}: {}", avi_filename.c_str(), std::strerror(errno));
 
     buffer = new char[FCC_OFFSET + 6];
 
@@ -1115,7 +1117,7 @@ std::string getAVIFourCC(const fs::path& avi_filename)
     fclose(f);
     if (rb != FCC_OFFSET + 4) {
         delete[] buffer;
-        throw_std_runtime_error("could not read header of " + avi_filename.native() + " : " + strerror(errno));
+        throw_std_runtime_error("Could not read header of {}: {}", avi_filename.c_str(), std::strerror(errno));
     }
 
     buffer[FCC_OFFSET + 5] = '\0';
@@ -1144,7 +1146,7 @@ std::string getHostName(const struct sockaddr* addr)
     int len = addr->sa_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
     int ret = getnameinfo(addr, len, hoststr, sizeof(hoststr), portstr, sizeof(portstr), NI_NOFQDN);
     if (ret != 0) {
-        log_debug("could not determine getnameinfo: {}", strerror(errno));
+        log_debug("could not determine getnameinfo: {}", std::strerror(errno));
     }
 
     return hoststr;
@@ -1163,7 +1165,7 @@ int sockAddrCmpAddr(const struct sockaddr* sa, const struct sockaddr* sb)
         return memcmp(reinterpret_cast<const char*>(&(SOCK_ADDR_IN6_ADDR(sa))), reinterpret_cast<const char*>(&(SOCK_ADDR_IN6_ADDR(sb))), sizeof(SOCK_ADDR_IN6_ADDR(sa)));
     }
 
-    throw_std_runtime_error("unsupported address family :" + std::to_string(sa->sa_family));
+    throw_std_runtime_error("Unsupported address family: {}", sa->sa_family);
 }
 
 std::string sockAddrGetNameInfo(const struct sockaddr* sa)
@@ -1173,7 +1175,7 @@ std::string sockAddrGetNameInfo(const struct sockaddr* sa)
     int len = sa->sa_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
     int ret = getnameinfo(sa, len, hoststr, sizeof(hoststr), portstr, sizeof(portstr), NI_NUMERICHOST | NI_NUMERICSERV);
     if (ret != 0) {
-        throw_std_runtime_error(fmt::format("could not determine getnameinfo: {}", strerror(errno)));
+        throw_std_runtime_error("could not determine getnameinfo: {}", std::strerror(errno));
     }
 
     return std::string(hoststr) + ":" + std::string(portstr);
@@ -1199,7 +1201,7 @@ int find_local_port(in_port_t range_min, in_port_t range_max)
 
         fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) {
-            log_error("could not determine free port: error creating socket: {}", strerror(errno));
+            log_error("could not determine free port: error creating socket: {}", std::strerror(errno));
             return -1;
         }
 
@@ -1210,7 +1212,7 @@ int find_local_port(in_port_t range_min, in_port_t range_max)
             return -1;
         }
 
-        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr = {};
         server_addr.sin_family = AF_INET;
         memcpy(&server_addr.sin_addr.s_addr, server->h_addr, server->h_length);
         server_addr.sin_port = htons(port);

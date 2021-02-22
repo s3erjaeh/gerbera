@@ -200,9 +200,9 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
     std::make_shared<ConfigStringSetup>(CFG_SERVER_STORAGE_MYSQL_DATABASE,
         "/server/storage/mysql/database", "config-server.html#storage",
         DEFAULT_MYSQL_DB),
-    std::make_shared<ConfigStringSetup>(CFG_SERVER_STORAGE_MYSQL_INIT_SQL_PATH,
-        "/server/storage/mysql/init-sql-path", "config-server.html#storage",
-        ""), // This should really be "dataDir / mysql.sql"
+    std::make_shared<ConfigPathSetup>(CFG_SERVER_STORAGE_MYSQL_INIT_SQL_FILE,
+        "/server/storage/mysql/init-sql-file", "config-server.html#storage",
+        "", true), // This should really be "dataDir / mysql.sql"
 #else
     std::make_shared<ConfigBoolSetup>(CFG_SERVER_STORAGE_MYSQL_ENABLED,
         "/server/storage/mysql/attribute::enabled", "config-server.html#storage",
@@ -237,9 +237,9 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
         "/server/storage/sqlite3/backup/attribute::interval", "config-server.html#storage",
         DEFAULT_SQLITE_BACKUP_INTERVAL, 1, ConfigIntSetup::CheckMinValue),
 
-    std::make_shared<ConfigStringSetup>(CFG_SERVER_STORAGE_SQLITE_INIT_SQL_PATH,
-        "/server/storage/sqlite3/init-sql-path", "config-server.html#storage",
-        ""), // This should really be "dataDir / sqlite3.sql"
+    std::make_shared<ConfigPathSetup>(CFG_SERVER_STORAGE_SQLITE_INIT_SQL_FILE,
+        "/server/storage/sqlite3/init-sql-file", "config-server.html#storage",
+        "", true), // This should really be "dataDir / sqlite3.sql"
 
     std::make_shared<ConfigBoolSetup>(CFG_SERVER_UI_ENABLED,
         "/server/ui/attribute::enabled", "config-server.html#ui",
@@ -320,6 +320,9 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
         DEFAULT_JS_CHARSET),
     std::make_shared<ConfigPathSetup>(CFG_IMPORT_SCRIPTING_COMMON_SCRIPT,
         "/import/scripting/common-script", "config-import.html#common-script",
+        "", true, false),
+    std::make_shared<ConfigPathSetup>(CFG_IMPORT_SCRIPTING_CUSTOM_SCRIPT,
+        "/import/scripting/custom-script", "config-import.html#custom-script",
         "", true),
     std::make_shared<ConfigPathSetup>(CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT,
         "/import/scripting/playlist-script", "config-import.html#playlist-script",
@@ -327,9 +330,10 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
     std::make_shared<ConfigBoolSetup>(CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT_LINK_OBJECTS,
         "/import/scripting/playlist-script/attribute::create-link", "config-import.html#playlist-script",
         DEFAULT_PLAYLIST_CREATE_LINK),
-    std::make_shared<ConfigStringSetup>(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT,
-        "/import/scripting/virtual-layout/import-script", "config-import.html#scripting"),
-#endif // PY
+    std::make_shared<ConfigPathSetup>(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT,
+        "/import/scripting/virtual-layout/import-script", "config-import.html#scripting",
+        "", true),
+#endif // JS
     std::make_shared<ConfigStringSetup>(CFG_IMPORT_FILESYSTEM_CHARSET,
         "/import/filesystem-charset", "config-import.html#filesystem-charset",
         DEFAULT_FILESYSTEM_CHARSET),
@@ -465,7 +469,7 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
         DEFAULT_ATRAILERS_REFRESH),
     std::make_shared<ConfigEnumSetup<std::string>>(CFG_ONLINE_CONTENT_ATRAILERS_RESOLUTION,
         "/import/online-content/AppleTrailers/attribute::resolution", "config-online.html#appletrailers",
-        std::to_string(DEFAULT_ATRAILERS_RESOLUTION).c_str(),
+        fmt::to_string(DEFAULT_ATRAILERS_RESOLUTION).c_str(),
         std::map<std::string, std::string>({ { "640", "640" }, { "720", "720p" }, { "720p", "720p" } })),
 #endif
 
@@ -499,6 +503,8 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
         "attribute::hidden-files", "config-import.html#autoscan"),
     std::make_shared<ConfigIntSetup>(ATTR_AUTOSCAN_DIRECTORY_SCANCOUNT,
         "attribute::scan-count", "config-import.html#autoscan"),
+    std::make_shared<ConfigIntSetup>(ATTR_AUTOSCAN_DIRECTORY_TASKCOUNT,
+        "attribute::task-count", "config-import.html#autoscan"),
     std::make_shared<ConfigStringSetup>(ATTR_AUTOSCAN_DIRECTORY_LMT,
         "attribute::last-modified", "config-import.html#autoscan"),
 
@@ -797,7 +803,7 @@ std::shared_ptr<ConfigSetup> ConfigManager::findConfigSetup(config_option_t opti
     if (save)
         return nullptr;
 
-    throw std::runtime_error(fmt::format("Error in config code: {} tag not found", int(option)));
+    throw_std_runtime_error("Error in config code: {} tag not found", option);
 }
 
 std::shared_ptr<ConfigSetup> ConfigManager::findConfigSetupByPath(const std::string& key, bool save, const std::shared_ptr<ConfigSetup>& parent)
@@ -835,7 +841,7 @@ std::shared_ptr<ConfigSetup> ConfigManager::findConfigSetupByPath(const std::str
         return (co != complexOptions.end()) ? *co : nullptr;
     }
 
-    throw std::runtime_error(fmt::format("Error in config code: {} tag not found", key));
+    throw_std_runtime_error("Error in config code: {} tag not found", key);
 }
 
 std::shared_ptr<ConfigOption> ConfigManager::setOption(const pugi::xml_node& root, config_option_t option, const std::map<std::string, std::string>* arguments)
@@ -873,7 +879,7 @@ void ConfigManager::load(const fs::path& userHome)
 
     // first check if the config file itself looks ok, it must have a config
     // and a server tag
-    if (std::string(root.name()) != ConfigSetup::ROOT_NAME)
+    if (root.name() != ConfigSetup::ROOT_NAME)
         throw std::runtime_error("Error in config file: <config> tag not found");
 
     if (root.child("server") == nullptr)
@@ -894,7 +900,7 @@ void ConfigManager::load(const fs::path& userHome)
     }
 
     if (!fs::is_directory(temp))
-        throw std::runtime_error(fmt::format("Directory '{}' does not exist", temp));
+        throw_std_runtime_error("Directory '{}' does not exist", temp);
     co->makeOption(temp, self);
     ConfigPathSetup::Home = temp;
 
@@ -939,12 +945,9 @@ void ConfigManager::load(const fs::path& userHome)
         setOption(root, CFG_SERVER_STORAGE_MYSQL_SOCKET);
         setOption(root, CFG_SERVER_STORAGE_MYSQL_PASSWORD);
 
-        co = findConfigSetup(CFG_SERVER_STORAGE_MYSQL_INIT_SQL_PATH);
-        temp = co->getXmlContent(root);
-        if (temp.empty()) {
-            temp = dataDir / "mysql.sql";
-        }
-        co->makeOption(temp, self);
+        co = findConfigSetup(CFG_SERVER_STORAGE_MYSQL_INIT_SQL_FILE);
+        co->setDefaultValue(dataDir / "mysql.sql");
+        co->makeOption(root, self);
     }
 #else
     if (mysql_en) {
@@ -961,12 +964,9 @@ void ConfigManager::load(const fs::path& userHome)
         setOption(root, CFG_SERVER_STORAGE_SQLITE_BACKUP_ENABLED);
         setOption(root, CFG_SERVER_STORAGE_SQLITE_BACKUP_INTERVAL);
 
-        co = findConfigSetup(CFG_SERVER_STORAGE_SQLITE_INIT_SQL_PATH);
-        temp = co->getXmlContent(root);
-        if (temp.empty()) {
-            temp = dataDir / "sqlite3.sql";
-        }
-        co->makeOption(temp, self);
+        co = findConfigSetup(CFG_SERVER_STORAGE_SQLITE_INIT_SQL_FILE);
+        co->setDefaultValue(dataDir / "sqlite3.sql");
+        co->makeOption(root, self);
     }
 
     std::string dbDriver;
@@ -988,7 +988,7 @@ void ConfigManager::load(const fs::path& userHome)
 
     // now get the option list for the drop down menu
     auto menu_opts = setOption(root, CFG_SERVER_UI_ITEMS_PER_PAGE_DROPDOWN)->getArrayOption();
-    if (std::none_of(menu_opts.begin(), menu_opts.end(), [=](const auto& s) { return s == std::to_string(def_ipp); }))
+    if (std::none_of(menu_opts.begin(), menu_opts.end(), [=](const auto& s) { return s == fmt::to_string(def_ipp); }))
         throw std::runtime_error("Error in config file: at least one <option> "
                                  "under <items-per-page> must match the "
                                  "<items-per-page default=\"\" /> attribute");
@@ -1006,7 +1006,7 @@ void ConfigManager::load(const fs::path& userHome)
     setOption(root, CFG_IMPORT_FOLLOW_SYMLINKS);
     setOption(root, CFG_IMPORT_MAPPINGS_IGNORE_UNKNOWN_EXTENSIONS);
     bool csens = setOption(root, CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_CASE_SENSITIVE)->getBoolOption();
-    args["tolower"] = std::to_string(!csens);
+    args["tolower"] = fmt::to_string(!csens);
     setOption(root, CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_LIST, &args);
     args.clear();
     setOption(root, CFG_IMPORT_MAPPINGS_MIMETYPE_TO_CONTENTTYPE_LIST);
@@ -1115,6 +1115,11 @@ void ConfigManager::load(const fs::path& userHome)
     co->setDefaultValue(dataDir / DEFAULT_JS_DIR / DEFAULT_COMMON_SCRIPT);
     co->makeOption(root, self);
 
+    co = findConfigSetup(CFG_IMPORT_SCRIPTING_CUSTOM_SCRIPT);
+    args["resolveEmpty"] = "false";
+    co->makeOption(root, self, &args);
+    args.clear();
+
     setOption(root, CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT_LINK_OBJECTS);
 #endif
 
@@ -1144,9 +1149,8 @@ void ConfigManager::load(const fs::path& userHome)
     }
 
     co = findConfigSetup(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT);
-    args["isFile"] = std::to_string(true);
-    args["mustExist"] = std::to_string(layoutType == "js");
-    args["notEmpty"] = std::to_string(layoutType == "js");
+    args["mustExist"] = fmt::to_string(layoutType == "js");
+    args["notEmpty"] = fmt::to_string(layoutType == "js");
     co->setDefaultValue(dataDir / DEFAULT_JS_DIR / DEFAULT_IMPORT_SCRIPT);
     co->makeOption(root, self, &args);
     args.clear();
@@ -1155,7 +1159,7 @@ void ConfigManager::load(const fs::path& userHome)
 #endif
     co = findConfigSetup(CFG_SERVER_PORT);
     // 0 means, that the SDK will any free port itself
-    co->makeOption((port == 0) ? co->getXmlContent(root) : std::to_string(port), self);
+    co->makeOption((port == 0) ? co->getXmlContent(root) : fmt::to_string(port), self);
 
     setOption(root, CFG_SERVER_ALIVE_INTERVAL);
     setOption(root, CFG_IMPORT_MAPPINGS_MIMETYPE_TO_UPNP_CLASS_LIST);
@@ -1292,7 +1296,7 @@ void ConfigManager::load(const fs::path& userHome)
     int atrailers_refresh = setOption(root, CFG_ONLINE_CONTENT_ATRAILERS_REFRESH)->getIntOption();
 
     co = findConfigSetup(CFG_ONLINE_CONTENT_ATRAILERS_PURGE_AFTER);
-    co->makeOption(std::to_string(atrailers_refresh), self);
+    co->makeOption(fmt::to_string(atrailers_refresh), self);
 
     setOption(root, CFG_ONLINE_CONTENT_ATRAILERS_UPDATE_AT_START);
     setOption(root, CFG_ONLINE_CONTENT_ATRAILERS_RESOLUTION);

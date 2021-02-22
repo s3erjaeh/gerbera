@@ -29,14 +29,16 @@ public:
         create_directory(configDir);
 
         // Create mock files, allowing for .init()
-        fs::path mockFiles[3] = {
+        auto mockFiles = std::array {
             grbJs / "common.js",
             grbJs / "import.js",
-            grbJs / "playlists.js"
+            grbJs / "playlists.js",
+            gerberaDir / "sqlite3.sql",
+            gerberaDir / "mysql.sql",
         };
         std::ofstream file;
-        for (int i = 0; i < 3; i++) {
-            file.open(mockFiles[i]);
+        for (const auto& mFile : mockFiles) {
+            file.open(mFile);
             file.close();
         }
 
@@ -65,7 +67,7 @@ public:
     void create_directory(fs::path dir)
     {
         if (mkdir(dir.c_str(), 0777) < 0) {
-            throw_std_runtime_error(fmt::format("Failed to create test_config temporary directory for testing: {}", dir.c_str()));
+            throw_std_runtime_error("Failed to create test_config temporary directory for testing: {}", dir.c_str());
         };
     }
 

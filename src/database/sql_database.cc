@@ -70,6 +70,7 @@ enum {
     _update_id,
     _mime_type,
     _flags,
+    _part_number,
     _track_number,
     _service_id,
     _ref_upnp_class,
@@ -94,8 +95,8 @@ enum {
 #define SEL_EQ_SP_FQ_DT_BQ << QTE << ',' << TQ('f') << '.' << QTB <<
 #define SEL_EQ_SP_RFQ_DT_BQ << QTE << ',' << TQ("rf") << '.' << QTB <<
 
-#define SELECT_DATA_FOR_STRINGBUFFER                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-    TQ('f') << '.' << QTB << "id" SEL_EQ_SP_FQ_DT_BQ "ref_id" SEL_EQ_SP_FQ_DT_BQ "parent_id" SEL_EQ_SP_FQ_DT_BQ "object_type" SEL_EQ_SP_FQ_DT_BQ "upnp_class" SEL_EQ_SP_FQ_DT_BQ "dc_title" SEL_EQ_SP_FQ_DT_BQ "location" SEL_EQ_SP_FQ_DT_BQ "location_hash" SEL_EQ_SP_FQ_DT_BQ "metadata" SEL_EQ_SP_FQ_DT_BQ "auxdata" SEL_EQ_SP_FQ_DT_BQ "resources" SEL_EQ_SP_FQ_DT_BQ "update_id" SEL_EQ_SP_FQ_DT_BQ "mime_type" SEL_EQ_SP_FQ_DT_BQ "flags" SEL_EQ_SP_FQ_DT_BQ "track_number" SEL_EQ_SP_FQ_DT_BQ "service_id" SEL_EQ_SP_RFQ_DT_BQ "upnp_class" SEL_EQ_SP_RFQ_DT_BQ "location" SEL_EQ_SP_RFQ_DT_BQ "metadata" SEL_EQ_SP_RFQ_DT_BQ "auxdata" SEL_EQ_SP_RFQ_DT_BQ "resources" SEL_EQ_SP_RFQ_DT_BQ "mime_type" SEL_EQ_SP_RFQ_DT_BQ "service_id" << QTE \
+#define SELECT_DATA_FOR_STRINGBUFFER                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
+    TQ('f') << '.' << QTB << "id" SEL_EQ_SP_FQ_DT_BQ "ref_id" SEL_EQ_SP_FQ_DT_BQ "parent_id" SEL_EQ_SP_FQ_DT_BQ "object_type" SEL_EQ_SP_FQ_DT_BQ "upnp_class" SEL_EQ_SP_FQ_DT_BQ "dc_title" SEL_EQ_SP_FQ_DT_BQ "location" SEL_EQ_SP_FQ_DT_BQ "location_hash" SEL_EQ_SP_FQ_DT_BQ "metadata" SEL_EQ_SP_FQ_DT_BQ "auxdata" SEL_EQ_SP_FQ_DT_BQ "resources" SEL_EQ_SP_FQ_DT_BQ "update_id" SEL_EQ_SP_FQ_DT_BQ "mime_type" SEL_EQ_SP_FQ_DT_BQ "flags" SEL_EQ_SP_FQ_DT_BQ "part_number" SEL_EQ_SP_FQ_DT_BQ "track_number" SEL_EQ_SP_FQ_DT_BQ "service_id" SEL_EQ_SP_RFQ_DT_BQ "upnp_class" SEL_EQ_SP_RFQ_DT_BQ "location" SEL_EQ_SP_RFQ_DT_BQ "metadata" SEL_EQ_SP_RFQ_DT_BQ "auxdata" SEL_EQ_SP_RFQ_DT_BQ "resources" SEL_EQ_SP_RFQ_DT_BQ "mime_type" SEL_EQ_SP_RFQ_DT_BQ "service_id" << QTE \
             << ',' << TQD("as", "persistent")
 
 #define SQL_QUERY_FOR_STRINGBUFFER "SELECT " << SELECT_DATA_FOR_STRINGBUFFER << " FROM " << TQ(CDS_OBJECT_TABLE) << ' ' << TQ('f') << " LEFT JOIN " \
@@ -306,6 +307,13 @@ std::vector<std::shared_ptr<SQLDatabase::AddUpdateTable>> SQLDatabase::_addUpdat
                 cdsObjectSql["track_number"] = SQL_NULL;
         }
 
+        if (item->getPartNumber() > 0) {
+            cdsObjectSql["part_number"] = quote(item->getPartNumber());
+        } else {
+            if (isUpdate)
+                cdsObjectSql["part_number"] = SQL_NULL;
+        }
+
         if (!item->getServiceID().empty()) {
             if (!hasReference || std::static_pointer_cast<CdsItem>(refObj)->getServiceID() != item->getServiceID())
                 cdsObjectSql["service_id"] = quote(item->getServiceID());
@@ -341,7 +349,7 @@ std::vector<std::shared_ptr<SQLDatabase::AddUpdateTable>> SQLDatabase::_addUpdat
 
     if (obj->getParentID() == INVALID_OBJECT_ID)
         throw_std_runtime_error("tried to create or update an object with an illegal parent id");
-    cdsObjectSql["parent_id"] = std::to_string(obj->getParentID());
+    cdsObjectSql["parent_id"] = fmt::to_string(obj->getParentID());
 
     returnVal.push_back(
         std::make_shared<AddUpdateTable>(CDS_OBJECT_TABLE, cdsObjectSql, isUpdate ? "update" : "insert"));
@@ -387,7 +395,7 @@ void SQLDatabase::updateObject(std::shared_ptr<CdsObject> obj, int* changedConta
         data.push_back(std::make_shared<AddUpdateTable>(CDS_OBJECT_TABLE, cdsObjectSql, "update"));
     } else {
         if (IS_FORBIDDEN_CDS_ID(obj->getID()))
-            throw_std_runtime_error("tried to update an object with a forbidden ID (" + std::to_string(obj->getID()) + ")");
+            throw_std_runtime_error("Tried to update an object with a forbidden ID ({})", obj->getID());
         data = _addUpdateObject(obj, true, changedContainer);
     }
     for (const auto& addUpdateTable : data) {
@@ -418,7 +426,7 @@ std::shared_ptr<CdsObject> SQLDatabase::loadObject(int objectID)
     if (res != nullptr && (row = res->nextRow()) != nullptr) {
         return createObjectFromRow(row);
     }
-    throw ObjectNotFoundException("Object not found: " + std::to_string(objectID));
+    throw ObjectNotFoundException(fmt::format("Object not found: {}", objectID));
 }
 
 std::shared_ptr<CdsObject> SQLDatabase::loadObjectByServiceID(const std::string& serviceID)
@@ -477,7 +485,7 @@ std::vector<std::shared_ptr<CdsObject>> SQLDatabase::browse(const std::unique_pt
     if (res != nullptr && (row = res->nextRow()) != nullptr) {
         objectType = std::stoi(row->col(0));
     } else {
-        throw ObjectNotFoundException("Object not found: " + std::to_string(objectID));
+        throw ObjectNotFoundException(fmt::format("Object not found: {}", objectID));
     }
 
     row = nullptr;
@@ -494,8 +502,10 @@ std::vector<std::shared_ptr<CdsObject>> SQLDatabase::browse(const std::unique_pt
     // order by code..
     auto orderByCode = [&]() {
         std::ostringstream qb;
-        if (param->getFlag(BROWSE_TRACK_SORT))
+        if (param->getFlag(BROWSE_TRACK_SORT)) {
+            qb << TQD('f', "part_number") << ',';
             qb << TQD('f', "track_number") << ',';
+        }
         qb << TQD('f', "dc_title");
         return qb.str();
     };
@@ -674,7 +684,7 @@ std::shared_ptr<CdsObject> SQLDatabase::findObjectByPath(fs::path fullpath, bool
 
     auto res = select(qb);
     if (res == nullptr)
-        throw_std_runtime_error("error while doing select: " + qb.str());
+        throw_std_runtime_error("error while doing select: {}", qb.str());
 
     std::unique_ptr<SQLRow> row = res->nextRow();
     if (row == nullptr)
@@ -780,7 +790,7 @@ fs::path SQLDatabase::buildContainerPath(int parentID, const std::string& title)
 {
     //title = escape(title, xxx);
     if (parentID == CDS_ID_ROOT)
-        return std::string(1, VIRTUAL_CONTAINER_SEPARATOR) + title;
+        return fmt::format("{}{}", VIRTUAL_CONTAINER_SEPARATOR, title);
 
     std::ostringstream qb;
     qb << "SELECT " << TQ("location") << " FROM " << TQ(CDS_OBJECT_TABLE)
@@ -795,9 +805,9 @@ fs::path SQLDatabase::buildContainerPath(int parentID, const std::string& title)
         return "";
 
     char prefix;
-    fs::path path = stripLocationPrefix(row->col(0) + VIRTUAL_CONTAINER_SEPARATOR + title, &prefix);
+    fs::path path = stripLocationPrefix(fmt::format("{}{}{}", row->col(0), VIRTUAL_CONTAINER_SEPARATOR, title), &prefix);
     if (prefix != LOC_VIRT_PREFIX)
-        throw_std_runtime_error("tried to build a virtual container path with an non-virtual parentID");
+        throw_std_runtime_error("Tried to build a virtual container path with an non-virtual parentID");
 
     return path;
 }
@@ -828,15 +838,18 @@ void SQLDatabase::addContainerChain(std::string virtualPath, const std::string& 
         }
     }
 
-    int parentContainerID;
-    std::string newpath, container;
+    int parentContainerID = 0;
+    std::string newpath, container, newClass;
     stripAndUnescapeVirtualContainerFromPath(virtualPath, newpath, container);
+    auto classes = splitString(lastClass, '/');
+    if (!classes.empty()) {
+        newClass = classes.back();
+        classes.pop_back();
+    }
+    addContainerChain(newpath, classes.empty() ? "" : join(classes, '/'), INVALID_OBJECT_ID, &parentContainerID, updateID, std::map<std::string, std::string>());
 
-    addContainerChain(newpath, "", INVALID_OBJECT_ID, &parentContainerID, updateID, std::map<std::string, std::string>());
-
-    *containerID = createContainer(parentContainerID, container, virtualPath, true, lastClass, lastRefID, lastMetadata);
+    *containerID = createContainer(parentContainerID, container, virtualPath, true, newClass, lastRefID, lastMetadata);
     updateID.emplace(updateID.begin(), *containerID);
-    return;
 }
 
 std::string SQLDatabase::addLocationPrefix(char prefix, const std::string& path)
@@ -942,6 +955,7 @@ std::shared_ptr<CdsObject> SQLDatabase::createObjectFromRow(const std::unique_pt
         }
 
         item->setTrackNumber(stoiString(row->col(_track_number)));
+        item->setPartNumber(stoiString(row->col(_part_number)));
 
         if (!row->col(_ref_service_id).empty())
             item->setServiceID(row->col(_ref_service_id));
@@ -952,7 +966,7 @@ std::shared_ptr<CdsObject> SQLDatabase::createObjectFromRow(const std::unique_pt
     }
 
     if (!matched_types) {
-        throw DatabaseException("", "unknown object type: " + std::to_string(objectType));
+        throw DatabaseException("", fmt::format("Unknown object type: {}", objectType));
     }
 
     return obj;
@@ -999,7 +1013,7 @@ std::shared_ptr<CdsObject> SQLDatabase::createObjectFromSearchRow(const std::uni
 
         item->setTrackNumber(stoiString(row->col(to_underlying(SearchCol::track_number))));
     } else {
-        throw DatabaseException("", "unknown object type: " + std::to_string(objectType));
+        throw DatabaseException("", fmt::format("Unknown object type: {}", objectType));
     }
 
     return obj;
@@ -1131,7 +1145,7 @@ std::string SQLDatabase::findFolderImage(int id, std::string trackArtBase)
     q << TQ("id") << " IN ";
     q << "(";
     q << "SELECT " << TQ("ref_id") << " FROM " << TQ(CDS_OBJECT_TABLE) << " WHERE ";
-    q << TQ("parent_id") << '=' << quote(std::to_string(id)) << " AND ";
+    q << TQ("parent_id") << '=' << quote(fmt::to_string(id)) << " AND ";
     q << TQ("object_type") << '=' << quote(OBJECT_TYPE_ITEM);
 
     // only use this optimization on sqlite3
@@ -1144,7 +1158,7 @@ std::string SQLDatabase::findFolderImage(int id, std::string trackArtBase)
     q << "     ) OR ";
 #endif
     // straightforward folder listing of real filesystem
-    q << TQ("parent_id") << '=' << quote(std::to_string(id));
+    q << TQ("parent_id") << '=' << quote(fmt::to_string(id));
 #ifndef ONLY_REAL_FOLDER_ART
     q << ")";
 #endif
@@ -1194,7 +1208,7 @@ std::unique_ptr<Database::ChangedContainers> SQLDatabase::removeObjects(const st
 
     for (int id : *list) {
         if (IS_FORBIDDEN_CDS_ID(id)) {
-            throw_std_runtime_error("tried to delete a forbidden ID (" + std::to_string(id) + ")");
+            throw_std_runtime_error("Tried to delete a forbidden ID ({})", id);
         }
     }
 
@@ -1303,7 +1317,7 @@ std::unique_ptr<Database::ChangedContainers> SQLDatabase::removeObject(int objec
         }
     }
     if (IS_FORBIDDEN_CDS_ID(objectID))
-        throw_std_runtime_error("tried to delete a forbidden ID (" + std::to_string(objectID) + ")");
+        throw_std_runtime_error("Tried to delete a forbidden ID ({})", objectID);
     std::vector<int32_t> itemIds;
     std::vector<int32_t> containerIds;
     if (isContainer) {
@@ -1952,7 +1966,7 @@ std::unique_ptr<std::vector<int>> SQLDatabase::_checkOverlappingAutoscans(const 
         if (obj == nullptr)
             throw_std_runtime_error("Referenced object (by Autoscan) not found.");
         log_error("There is already an Autoscan set on {}", obj->getLocation().c_str());
-        throw_std_runtime_error("There is already an Autoscan set on " + obj->getLocation().string());
+        throw_std_runtime_error("There is already an Autoscan set on {}", obj->getLocation().c_str());
     }
 
     if (adir->getRecursive()) {
@@ -1960,7 +1974,7 @@ std::unique_ptr<std::vector<int>> SQLDatabase::_checkOverlappingAutoscans(const 
         q << "SELECT " << TQ("obj_id")
           << " FROM " << TQ(AUTOSCAN_TABLE)
           << " WHERE " << TQ("path_ids") << " LIKE "
-          << quote("%," + std::to_string(checkObjectID) + ",%");
+          << quote(fmt::format("%,{},%", checkObjectID));
         if (databaseID >= 0)
             q << " AND " << TQ("id") << " != " << quote(databaseID);
         q << " LIMIT 1";
@@ -1977,7 +1991,7 @@ std::unique_ptr<std::vector<int>> SQLDatabase::_checkOverlappingAutoscans(const 
             if (obj == nullptr)
                 throw_std_runtime_error("Referenced object (by Autoscan) not found.");
             log_error("Overlapping Autoscans are not allowed. There is already an Autoscan set on {}", obj->getLocation().c_str());
-            throw_std_runtime_error("Overlapping Autoscans are not allowed. There is already an Autoscan set on " + obj->getLocation().string());
+            throw_std_runtime_error("Overlapping Autoscans are not allowed. There is already an Autoscan set on {}", obj->getLocation().c_str());
         }
     }
 
@@ -2005,7 +2019,7 @@ std::unique_ptr<std::vector<int>> SQLDatabase::_checkOverlappingAutoscans(const 
     if (obj == nullptr)
         throw_std_runtime_error("Referenced object (by Autoscan) not found.");
     log_error("Overlapping Autoscans are not allowed. There is already a recursive Autoscan set on {}", obj->getLocation().c_str());
-    throw_std_runtime_error("Overlapping Autoscans are not allowed. There is already a recursive Autoscan set on " + obj->getLocation().string());
+    throw_std_runtime_error("Overlapping Autoscans are not allowed. There is already a recursive Autoscan set on {}", obj->getLocation().c_str());
 }
 
 std::unique_ptr<std::vector<int>> SQLDatabase::getPathIDs(int objectID)
@@ -2119,7 +2133,9 @@ std::unique_ptr<std::ostringstream> SQLDatabase::sqlForInsert(const std::shared_
 
     if (tableName == CDS_OBJECT_TABLE && obj->getID() != INVALID_OBJECT_ID) {
         throw_std_runtime_error("Attempted to insert new object with ID!");
-    } else if (tableName == METADATA_TABLE) {
+    }
+
+    if (tableName == METADATA_TABLE) {
         fields << "," << TQ("item_id");
         values << "," << obj->getID();
     }

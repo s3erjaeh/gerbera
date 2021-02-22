@@ -80,12 +80,15 @@ void AutoscanDirectory::setCurrentLMT(const std::string& loc, time_t lmt)
     }
 }
 
-void AutoscanDirectory::updateLMT()
+bool AutoscanDirectory::updateLMT()
 {
-    if (activeScanCount == 0) {
+    bool result = taskCount <= 0 && activeScanCount <= 0;
+    if (result) {
+        result = last_mod_previous_scan < last_mod_current_scan;
         last_mod_previous_scan = last_mod_current_scan;
         log_debug("set autoscan lmt location: {}; last_modified: {}", location.c_str(), last_mod_current_scan);
     }
+    return result;
 }
 
 time_t AutoscanDirectory::getPreviousLMT(const std::string& loc) const
@@ -119,7 +122,7 @@ std::string AutoscanDirectory::mapScanmode(ScanMode scanmode)
         scanmode_str = "inotify";
         break;
     default:
-        throw_std_runtime_error("illegal scanmode given to mapScanmode()");
+        throw_std_runtime_error("Illegal scanmode ({}) given to mapScanmode()", scanmode);
     }
     return scanmode_str;
 }
@@ -131,7 +134,7 @@ ScanMode AutoscanDirectory::remapScanmode(const std::string& scanmode)
     if (scanmode == "inotify")
         return ScanMode::INotify;
 
-    throw_std_runtime_error("illegal scanmode (" + scanmode + ") given to remapScanmode()");
+    throw_std_runtime_error("Illegal scanmode ({}) given to remapScanmode()", scanmode.c_str());
 }
 
 void AutoscanDirectory::copyTo(const std::shared_ptr<AutoscanDirectory>& copy) const

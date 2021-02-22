@@ -31,10 +31,11 @@
 #include "config/config.h"
 #include "config/directory_tweak.h"
 #include "iohandler/file_io_handler.h"
+#include "util/mime.h"
 #include "util/tools.h"
 
 MetacontentHandler::MetacontentHandler(const std::shared_ptr<Context>& context)
-    : MetadataHandler(std::move(context))
+    : MetadataHandler(context)
 {
 }
 
@@ -63,10 +64,12 @@ fs::path MetacontentHandler::getContentPath(const std::vector<std::string>& name
                     fileNames[toLower(p.path().filename())] = p;
 
             for (const auto& name : names) {
-                auto it = std::find_if(fileNames.begin(), fileNames.end(), [fileName = toLower(expandName(name, item))](const auto& testFile) { return testFile.first == fileName; });
-                if (it != fileNames.end()) {
-                    log_debug("{}: found", it->first.c_str());
-                    return it->second;
+                auto fileName = toLower(expandName(name, item));
+                for (const auto& [f, s] : fileNames) {
+                    if (f == fileName) {
+                        log_debug("{}: found", f.c_str());
+                        return s;
+                    }
                 }
             }
         }
@@ -113,7 +116,7 @@ std::vector<std::string> FanArtHandler::names = {
 bool FanArtHandler::initDone = false;
 
 FanArtHandler::FanArtHandler(const std::shared_ptr<Context>& context)
-    : MetacontentHandler(std::move(context))
+    : MetacontentHandler(context)
 {
     if (!initDone) {
         std::vector<std::string> files = this->config->getArrayOption(CFG_IMPORT_RESOURCES_FANART_FILE_LIST);
@@ -131,7 +134,10 @@ void FanArtHandler::fillMetadata(std::shared_ptr<CdsObject> item)
 
     if (!path.empty()) {
         auto resource = std::make_shared<CdsResource>(CH_FANART);
-        resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo("jpg"));
+        std::string type = path.extension().string().substr(1);
+        std::string mimeType = mime->getMimeType(path, fmt::format("image/{}", type));
+
+        resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo(mimeType));
         resource->addAttribute(R_RESOURCE_FILE, path.c_str());
         resource->addParameter(RESOURCE_CONTENT_TYPE, ID3_ALBUM_ART);
         item->addResource(resource);
@@ -151,7 +157,7 @@ std::unique_ptr<IOHandler> FanArtHandler::serveContent(std::shared_ptr<CdsObject
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        log_warning("File does not exist: {} ({})", path.c_str(), strerror(errno));
+        log_warning("File does not exist: {} ({})", path.c_str(), std::strerror(errno));
         return nullptr;
     }
     auto io_handler = std::make_unique<FileIOHandler>(path);
@@ -170,7 +176,7 @@ std::vector<std::string> ContainerArtHandler::names = {
 bool ContainerArtHandler::initDone = false;
 
 ContainerArtHandler::ContainerArtHandler(const std::shared_ptr<Context>& context)
-    : MetacontentHandler(std::move(context))
+    : MetacontentHandler(context)
 {
     if (!initDone) {
         std::vector<std::string> files = this->config->getArrayOption(CFG_IMPORT_RESOURCES_CONTAINERART_FILE_LIST);
@@ -189,7 +195,10 @@ void ContainerArtHandler::fillMetadata(std::shared_ptr<CdsObject> item)
 
     if (!path.empty()) {
         auto resource = std::make_shared<CdsResource>(CH_CONTAINERART);
-        resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo("jpg"));
+        std::string type = path.extension().string().substr(1);
+        std::string mimeType = mime->getMimeType(path, fmt::format("image/{}", type));
+
+        resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo(mimeType));
         resource->addAttribute(R_RESOURCE_FILE, path.c_str());
         resource->addParameter(RESOURCE_CONTENT_TYPE, ID3_ALBUM_ART);
         item->addResource(resource);
@@ -210,7 +219,7 @@ std::unique_ptr<IOHandler> ContainerArtHandler::serveContent(std::shared_ptr<Cds
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        log_warning("File does not exist: {} ({})", path.c_str(), strerror(errno));
+        log_warning("File does not exist: {} ({})", path.c_str(), std::strerror(errno));
         return nullptr;
     }
     auto io_handler = std::make_unique<FileIOHandler>(path);
@@ -224,7 +233,7 @@ std::vector<std::string> SubtitleHandler::names = {
 bool SubtitleHandler::initDone = false;
 
 SubtitleHandler::SubtitleHandler(const std::shared_ptr<Context>& context)
-    : MetacontentHandler(std::move(context))
+    : MetacontentHandler(context)
 {
     if (!initDone) {
         std::vector<std::string> files = this->config->getArrayOption(CFG_IMPORT_RESOURCES_SUBTITLE_FILE_LIST);
@@ -242,7 +251,14 @@ void SubtitleHandler::fillMetadata(std::shared_ptr<CdsObject> item)
     if (!path.empty()) {
         auto resource = std::make_shared<CdsResource>(CH_SUBTITLE);
         std::string type = path.extension().string().substr(1);
-        resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo(type));
+
+        std::string mimeType = mime->getMimeType(path, fmt::format("text/{}", type));
+        auto pos = mimeType.find("plain");
+        if (pos != std::string::npos) {
+            mimeType = fmt::format("{}{}", mimeType.substr(0, pos), type);
+        }
+
+        resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo(mimeType));
         resource->addAttribute(R_RESOURCE_FILE, path.c_str());
         resource->addParameter(RESOURCE_CONTENT_TYPE, VIDEO_SUB);
         resource->addParameter("type", type);
@@ -263,7 +279,7 @@ std::unique_ptr<IOHandler> SubtitleHandler::serveContent(std::shared_ptr<CdsObje
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        log_warning("File does not exist: {} ({})", path.c_str(), strerror(errno));
+        log_warning("File does not exist: {} ({})", path.c_str(), std::strerror(errno));
         return nullptr;
     }
     auto io_handler = std::make_unique<FileIOHandler>(path);
@@ -278,7 +294,7 @@ std::vector<std::string> ResourceHandler::names = {
 bool ResourceHandler::initDone = false;
 
 ResourceHandler::ResourceHandler(const std::shared_ptr<Context>& context)
-    : MetacontentHandler(std::move(context))
+    : MetacontentHandler(context)
 {
     if (!initDone) {
         std::vector<std::string> files = this->config->getArrayOption(CFG_IMPORT_RESOURCES_RESOURCE_FILE_LIST);
@@ -314,7 +330,7 @@ std::unique_ptr<IOHandler> ResourceHandler::serveContent(std::shared_ptr<CdsObje
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        log_warning("File does not exist: {} ({})", path.c_str(), strerror(errno));
+        log_warning("File does not exist: {} ({})", path.c_str(), std::strerror(errno));
         return nullptr;
     }
     auto io_handler = std::make_unique<FileIOHandler>(path);

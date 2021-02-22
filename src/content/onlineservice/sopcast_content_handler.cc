@@ -125,9 +125,7 @@ std::shared_ptr<CdsObject> SopCastContentHandler::getObject(const std::string& g
     auto resource = std::make_shared<CdsResource>(CH_DEFAULT);
     item->addResource(resource);
 
-    item->setAuxData(ONLINE_SERVICE_AUX_ID,
-        std::to_string(OS_SopCast));
-
+    item->setAuxData(ONLINE_SERVICE_AUX_ID, fmt::to_string(OS_SopCast));
     item->setAuxData(SOPCAST_AUXDATA_GROUP, groupName);
 
     std::string temp = channel.attribute("id").as_string();
@@ -206,9 +204,7 @@ std::shared_ptr<CdsObject> SopCastContentHandler::getObject(const std::string& g
 
     item->setClass(UPNP_CLASS_VIDEO_BROADCAST);
 
-    struct timespec ts;
-    getTimespecNow(&ts);
-    item->setAuxData(ONLINE_SERVICE_LAST_UPDATE, std::to_string(ts.tv_sec));
+    item->setAuxData(ONLINE_SERVICE_LAST_UPDATE, fmt::to_string(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
     item->setFlag(OBJECT_FLAG_PROXY_URL);
     item->setFlag(OBJECT_FLAG_ONLINE_SERVICE);
 

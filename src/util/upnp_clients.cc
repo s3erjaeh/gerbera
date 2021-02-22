@@ -34,7 +34,7 @@
 #include <upnp.h>
 
 // table of supported clients (sequence of entries matters!)
-static const auto bultinClientInfo = std::array<struct ClientInfo, 8> {
+static const auto bultinClientInfo = std::array<ClientInfo, 8> {
     {
 
         // Used for not explicitly listed clients, must be first entry
@@ -129,7 +129,7 @@ Clients::Clients(const std::shared_ptr<Config>& config)
         clientInfo.push_back(*client);
     }
 
-    cache = std::make_shared<std::vector<struct ClientCacheEntry>>();
+    cache = std::make_shared<std::vector<ClientCacheEntry>>();
 }
 
 Clients::~Clients() = default;
@@ -192,7 +192,7 @@ bool Clients::getInfoByAddr(const struct sockaddr_storage* addr, const ClientInf
 
         if (c.match.find('.') != std::string::npos) {
             // IPv4
-            struct sockaddr_in clientAddr;
+            struct sockaddr_in clientAddr = {};
             clientAddr.sin_family = AF_INET;
             clientAddr.sin_addr.s_addr = inet_addr(c.match.c_str());
             if (sockAddrCmpAddr(reinterpret_cast<const struct sockaddr*>(&clientAddr), reinterpret_cast<const struct sockaddr*>(addr)) == 0) {
@@ -200,7 +200,7 @@ bool Clients::getInfoByAddr(const struct sockaddr_storage* addr, const ClientInf
             }
         } else if (c.match.find(':') != std::string::npos) {
             // IPv6
-            struct sockaddr_in6 clientAddr;
+            struct sockaddr_in6 clientAddr = {};
             clientAddr.sin6_family = AF_INET6;
             if (inet_pton(AF_INET6, c.match.c_str(), &clientAddr.sin6_addr) == 1) {
                 if (sockAddrCmpAddr(reinterpret_cast<const struct sockaddr*>(&clientAddr), reinterpret_cast<const struct sockaddr*>(addr)) == 0) {

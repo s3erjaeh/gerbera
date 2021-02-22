@@ -59,13 +59,13 @@ ProcessExecutor::ProcessExecutor(const std::string& command, const std::vector<s
 
     switch (process_id) {
     case -1:
-        throw_std_runtime_error("Failed to launch process " + command);
+        throw_std_runtime_error("Failed to launch process {}", command.c_str());
 
     case 0:
         sigset_t mask_set;
         pthread_sigmask(SIG_SETMASK, &mask_set, nullptr);
         log_debug("Launching process: {}", command.c_str());
-        execvp(command.c_str(), const_cast<char** const>(argv));
+        execvp(command.c_str(), const_cast<char**>(argv));
         break;
     default:
         break;

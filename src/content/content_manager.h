@@ -40,6 +40,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <dirent.h>
+
 #include "autoscan.h"
 #include "cds_objects.h"
 #include "common.h"
@@ -238,6 +240,9 @@ public:
     int addContainerChain(const std::string& chain, const std::string& lastClass = "",
         int lastRefID = INVALID_OBJECT_ID, const std::shared_ptr<CdsObject>& origObj = nullptr);
 
+    /// \return ID of the last container in the chain.
+    int addContainerTree(const std::vector<std::shared_ptr<CdsObject>>& chain);
+
     /// \brief Adds a virtual container specified by parentID and title
     /// \param parentID the id of the parent.
     /// \param title the title of the container.
@@ -326,7 +331,6 @@ protected:
     using AutoLock = std::lock_guard<decltype(mutex)>;
     using AutoLockU = std::unique_lock<decltype(mutex)>;
 
-    bool ignore_unknown_extensions;
     std::map<std::string, std::string> mimetype_contenttype_map;
 
     std::shared_ptr<AutoscanList> autoscan_timed;
@@ -354,8 +358,10 @@ protected:
     static bool isLink(const fs::path& path, bool allowLinks);
     std::shared_ptr<CdsObject> createSingleItem(const fs::path& path, fs::path& rootPath, bool followSymlinks, bool checkDatabase, bool processExisting, const std::shared_ptr<CMAddFileTask>& task);
     bool updateAttachedResources(const std::shared_ptr<AutoscanDirectory>& adir, const char* location, const std::string& parentPath, bool all);
-
+    void finishScan(DIR* dir, const std::shared_ptr<AutoscanDirectory>& adir, const std::string& location, time_t lmt);
     static void invalidateAddTask(const std::shared_ptr<GenericTask>& t, const fs::path& path);
+
+    void assignFanArt(const std::vector<int>& containerIds, const std::shared_ptr<CdsObject>& origObj);
 
     template <typename T>
     void updateCdsObject(std::shared_ptr<T>& item, const std::map<std::string, std::string>& parameters);
@@ -371,8 +377,6 @@ protected:
 #endif
 
     bool layout_enabled;
-
-    void setLastModifiedTime(time_t lm);
 
     void signal() { cond.notify_one(); }
     static void* staticThreadProc(void* arg);

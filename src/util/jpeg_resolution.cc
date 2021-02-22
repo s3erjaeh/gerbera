@@ -175,5 +175,5 @@ std::string get_jpeg_resolution(const std::unique_ptr<IOHandler>& ioh)
     }
     ioh->close();
 
-    return std::to_string(w) + "x" + std::to_string(h);
+    return fmt::format("{}x{}", w, h);
 }

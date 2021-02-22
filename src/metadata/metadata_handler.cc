@@ -70,14 +70,14 @@ void MetadataHandler::setMetadata(const std::shared_ptr<Context>& context, const
     std::string location = item->getLocation();
     std::error_code ec;
     if (!isRegularFile(location, ec))
-        throw_std_runtime_error("Not a file: " + location);
+        throw_std_runtime_error("Not a file: {}", location.c_str());
     auto filesize = getFileSize(location);
 
     std::string mimetype = item->getMimeType();
 
     auto resource = std::make_shared<CdsResource>(CH_DEFAULT);
     resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo(mimetype));
-    resource->addAttribute(R_SIZE, std::to_string(filesize));
+    resource->addAttribute(R_SIZE, fmt::to_string(filesize));
 
     item->addResource(resource);
 
@@ -139,17 +139,21 @@ void MetadataHandler::setMetadata(const std::shared_ptr<Context>& context, const
 
 std::string MetadataHandler::getMetaFieldName(metadata_fields_t field)
 {
-    const auto& itm = std::find_if(mt_keys.begin(), mt_keys.end(), [=](const auto& k) { return k.first == field; });
-    if (itm != mt_keys.end())
-        return itm->second;
+    for (const auto& [f, s] : mt_keys) {
+        if (f == field) {
+            return s;
+        }
+    }
     return "unknown";
 }
 
 std::string MetadataHandler::getResAttrName(resource_attributes_t attr)
 {
-    const auto& itm = std::find_if(res_keys.begin(), res_keys.end(), [=](const auto& k) { return k.first == attr; });
-    if (itm != res_keys.end())
-        return itm->second;
+    for (const auto& [f, s] : res_keys) {
+        if (f == attr) {
+            return s;
+        }
+    }
     return "unknown";
 }
 
@@ -181,7 +185,7 @@ std::unique_ptr<MetadataHandler> MetadataHandler::createHandler(const std::share
     case CH_RESOURCE:
         return std::make_unique<ResourceHandler>(context);
     default:
-        throw_std_runtime_error("unknown content handler ID: " + std::to_string(handlerType));
+        throw_std_runtime_error("Unknown content handler ID: {}", handlerType);
     }
 }
 

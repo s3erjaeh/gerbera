@@ -36,7 +36,6 @@
 #include <filesystem>
 #include <regex>
 
-#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -86,21 +85,13 @@ ContentManager::ContentManager(const std::shared_ptr<Context>& context,
     , mime(context->getMime())
     , database(context->getDatabase())
     , session_manager(context->getSessionManager())
-    , context(std::move(context))
+    , context(context)
     , timer(std::move(timer))
 {
     taskID = 1;
     working = false;
     shutdownFlag = false;
     layout_enabled = false;
-
-    ignore_unknown_extensions = config->getBoolOption(CFG_IMPORT_MAPPINGS_IGNORE_UNKNOWN_EXTENSIONS);
-    auto extension_mimetype_map = config->getDictionaryOption(CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_LIST);
-    if (ignore_unknown_extensions && (extension_mimetype_map.empty())) {
-        log_warning("Ignore unknown extensions set, but no mappings specified");
-        log_warning("Please review your configuration!");
-        ignore_unknown_extensions = false;
-    }
 
     mimetype_contenttype_map = config->getDictionaryOption(CFG_IMPORT_MAPPINGS_MIMETYPE_TO_CONTENTTYPE_LIST);
 
@@ -140,8 +131,8 @@ void ContentManager::run()
     last_fm->run();
 #endif
 
-#ifdef HAVE_INOTIFY
     auto self = shared_from_this();
+#ifdef HAVE_INOTIFY
     inotify = std::make_unique<AutoscanInotify>(self);
 
     if (config->getBoolOption(CFG_IMPORT_AUTOSCAN_USE_INOTIFY)) {
@@ -177,7 +168,6 @@ void ContentManager::run()
 #ifdef SOPCAST
     if (config->getBoolOption(CFG_ONLINE_CONTENT_SOPCAST_ENABLED)) {
         try {
-            auto self = shared_from_this();
             auto sc = std::make_shared<SopCastService>(self);
 
             int i = config->getIntOption(CFG_ONLINE_CONTENT_SOPCAST_REFRESH);
@@ -204,7 +194,6 @@ void ContentManager::run()
 #ifdef ATRAILERS
     if (config->getBoolOption(CFG_ONLINE_CONTENT_ATRAILERS_ENABLED)) {
         try {
-            auto self = shared_from_this();
             auto at = std::make_shared<ATrailersService>(self);
 
             int i = config->getIntOption(CFG_ONLINE_CONTENT_ATRAILERS_REFRESH);
@@ -392,16 +381,14 @@ std::deque<std::shared_ptr<GenericTask>> ContentManager::getTasklist()
 
     // if there is no current task, then the queues are empty
     // and we do not have to allocate the array
-    if (t == nullptr && taskList.empty())
+    if (t == nullptr)
         return taskList;
 
-    if (t != nullptr)
-        taskList.push_back(t);
-
+    taskList.push_back(t);
     std::copy_if(taskQueue1.begin(), taskQueue1.end(), std::back_inserter(taskList), [](const auto& task) { return task->isValid(); });
 
-    for (const auto& t : taskQueue2) {
-        if (t->isValid())
+    for (const auto& task : taskQueue2) {
+        if (task->isValid())
             taskList.clear();
     }
 
@@ -415,13 +402,13 @@ void ContentManager::addVirtualItem(const std::shared_ptr<CdsObject>& obj, bool 
 
     std::error_code ec;
     if (!isRegularFile(path, ec))
-        throw_std_runtime_error("Not a file: " + path.string());
+        throw_std_runtime_error("Not a file: {}", path.c_str());
 
     auto pcdir = database->findObjectByPath(path);
     if (pcdir == nullptr) {
         pcdir = createObjectFromFile(path, true, allow_fifo);
         if (pcdir == nullptr) {
-            throw_std_runtime_error("Could not add " + path.string());
+            throw_std_runtime_error("Could not add {}", path.c_str());
         }
         if (pcdir->isItem()) {
             this->addObject(pcdir);
@@ -520,7 +507,7 @@ bool ContentManager::updateAttachedResources(const std::shared_ptr<AutoscanDirec
         // in order to rescan whole directory we have to set lmt to a very small value
         AutoScanSetting asSetting;
         asSetting.adir = adir;
-        adir->setCurrentLMT(parentPath, (time_t)1);
+        adir->setCurrentLMT(parentPath, time_t(1));
         asSetting.followSymlinks = config->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS);
         asSetting.hidden = config->getBoolOption(CFG_IMPORT_HIDDEN_FILES);
         asSetting.recursive = true;
@@ -548,7 +535,7 @@ void ContentManager::_removeObject(const std::shared_ptr<AutoscanDirectory>& adi
         auto obj = database->loadObject(objectID);
         if (obj != nullptr && obj->hasResource(CH_RESOURCE)) {
             auto parentPath = obj->getLocation().parent_path().string();
-            parentRemoved = updateAttachedResources(std::move(adir), obj->getLocation().c_str(), parentPath, all);
+            parentRemoved = updateAttachedResources(adir, obj->getLocation().c_str(), parentPath, all);
         }
     }
 
@@ -600,7 +587,6 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
             if (adir->persistent()) {
                 containerID = INVALID_OBJECT_ID;
             } else {
-                adir->setTaskCount(-1);
                 removeAutoscanDirectory(adir);
                 return;
             }
@@ -615,7 +601,6 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
                 return;
             }
 
-            adir->setTaskCount(-1);
             removeAutoscanDirectory(adir);
             return;
         }
@@ -637,14 +622,13 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
 
     DIR* dir = opendir(location.c_str());
     if (!dir) {
-        log_warning("Could not open {}: {}", location.c_str(), strerror(errno));
+        log_warning("Could not open {}: {}", location.c_str(), std::strerror(errno));
         if (adir->persistent()) {
             removeObject(adir, containerID, false);
             adir->setObjectID(INVALID_OBJECT_ID);
             database->updateAutoscanDirectory(adir);
             return;
         }
-        adir->setTaskCount(-1);
         removeObject(adir, containerID, false);
         removeAutoscanDirectory(adir);
         return;
@@ -664,8 +648,9 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
     unsigned int thisTaskID;
     if (task != nullptr) {
         thisTaskID = task->getID();
-    } else
+    } else {
         thisTaskID = 0;
+    }
 
     time_t last_modified_current_max = adir->getPreviousLMT(location);
     time_t last_modified_new_max = last_modified_current_max;
@@ -693,7 +678,7 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
         struct stat statbuf;
         int ret = stat(newPath.c_str(), &statbuf);
         if (ret != 0) {
-            log_error("Failed to stat {}, {}", newPath.c_str(), strerror(errno));
+            log_error("Failed to stat {}, {}", newPath.c_str(), std::strerror(errno));
             continue;
         }
 
@@ -701,8 +686,7 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
         // in this case we will invalidate the autoscan entry
         if (adir->getScanID() == INVALID_SCAN_ID) {
             log_info("lost autoscan for {}", newPath.c_str());
-            adir->setCurrentLMT(location, last_modified_new_max > 0 ? last_modified_new_max : (time_t)1);
-            closedir(dir);
+            finishScan(dir, adir, location, last_modified_new_max);
             return;
         }
 
@@ -772,22 +756,20 @@ void ContentManager::_rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, 
                 // in this case we will invalidate the autoscan entry
                 if (adir->getScanID() == INVALID_SCAN_ID) {
                     log_info("lost autoscan for {}", newPath.c_str());
-                    adir->setCurrentLMT(location, last_modified_new_max > 0 ? last_modified_new_max : (time_t)1);
-                    closedir(dir);
+                    finishScan(dir, adir, location, last_modified_new_max);
                     return;
                 }
                 // add directory, recursive, async, hidden flag, low priority
                 asSetting.recursive = true;
                 asSetting.rescanResource = false;
                 asSetting.mergeOptions(config, newPath);
+                // const fs::path& path, const fs::path& rootpath, AutoScanSetting& asSetting, bool async, bool lowPriority, unsigned int parentTaskID, bool cancellable
                 addFileInternal(newPath, rootpath, asSetting, true, true, thisTaskID, task->isCancellable());
             }
         }
     } // while
 
-    closedir(dir);
-
-    adir->setCurrentLMT(location, last_modified_new_max > 0 ? last_modified_new_max : (time_t)1);
+    finishScan(dir, adir, location, last_modified_new_max);
 
     if ((shutdownFlag) || ((task != nullptr) && !task->isValid())) {
         return;
@@ -814,7 +796,7 @@ void ContentManager::addRecursive(std::shared_ptr<AutoscanDirectory>& adir, cons
 
     DIR* dir = opendir(path.c_str());
     if (!dir) {
-        throw_std_runtime_error("could not list directory " + path.string() + " : " + strerror(errno));
+        throw_std_runtime_error("Could not list directory {} : {}", path.c_str(), std::strerror(errno));
     }
 
     int parentID = database->findObjectIDByPath(path);
@@ -866,12 +848,12 @@ void ContentManager::addRecursive(std::shared_ptr<AutoscanDirectory>& adir, cons
 
         // For the Web UI
         if (task != nullptr) {
-            task->setDescription("Importing: " + newPath.string());
+            task->setDescription(fmt::format("Importing: {}", newPath.c_str()));
         }
         struct stat statbuf;
         int ret = stat(newPath.c_str(), &statbuf);
         if (ret != 0) {
-            log_error("Failed to stat {}, {}", newPath.c_str(), strerror(errno));
+            log_error("Failed to stat {}, {}", newPath.c_str(), std::strerror(errno));
             continue;
         }
 
@@ -895,10 +877,15 @@ void ContentManager::addRecursive(std::shared_ptr<AutoscanDirectory>& adir, cons
             log_warning("skipping {} (ex:{})", newPath.c_str(), ex.what());
         }
     }
-    closedir(dir);
 
+    finishScan(dir, adir, path, last_modified_new_max);
+}
+
+void ContentManager::finishScan(DIR* dir, const std::shared_ptr<AutoscanDirectory>& adir, const std::string& location, time_t lmt)
+{
+    closedir(dir);
     if (adir != nullptr) {
-        adir->setCurrentLMT(path, last_modified_new_max > 0 ? last_modified_new_max : (time_t)1);
+        adir->setCurrentLMT(location, lmt > 0 ? lmt : (time_t)1);
     }
 }
 
@@ -1048,11 +1035,37 @@ void ContentManager::addContainer(int parentID, std::string title, const std::st
     addContainerChain(database->buildContainerPath(parentID, escape(std::move(title), VIRTUAL_CONTAINER_ESCAPE, VIRTUAL_CONTAINER_SEPARATOR)), upnpClass);
 }
 
+int ContentManager::addContainerTree(const std::vector<std::shared_ptr<CdsObject>>& chain)
+{
+    std::string tree;
+    int result = INVALID_OBJECT_ID;
+    std::vector<int> createdIds;
+    for (const auto& item : chain) {
+        if (item->getTitle().empty()) {
+            log_error("Received chain item without title");
+            return INVALID_OBJECT_ID;
+        }
+        tree = fmt::format("{}{}{}", tree, VIRTUAL_CONTAINER_SEPARATOR, item->getTitle());
+        log_debug("Received chain item {}", tree);
+        for (const auto& [key, val] : config->getDictionaryOption(CFG_IMPORT_LAYOUT_MAPPING)) {
+            tree = std::regex_replace(tree, std::regex(key), val);
+        }
+
+        database->addContainerChain(tree, item->getClass(), INVALID_OBJECT_ID, &result, createdIds, item->getMetadata());
+        assignFanArt({ result }, item);
+    }
+
+    if (!createdIds.empty()) {
+        update_manager->containerChanged(result);
+        session_manager->containerChangedUI(result);
+    }
+    return result;
+}
+
 int ContentManager::addContainerChain(const std::string& chain, const std::string& lastClass, int lastRefID, const std::shared_ptr<CdsObject>& origObj)
 {
     std::map<std::string, std::string> lastMetadata = origObj != nullptr ? origObj->getMetadata() : std::map<std::string, std::string>();
     std::vector<int> updateID;
-    int containerID;
 
     if (chain.empty())
         throw_std_runtime_error("addContainerChain() called with empty chain parameter");
@@ -1062,7 +1075,7 @@ int ContentManager::addContainerChain(const std::string& chain, const std::strin
         newChain = std::regex_replace(newChain, std::regex(key), val);
     }
 
-    log_debug("received chain: {} -> {} ({}) [{}]", chain.c_str(), newChain.c_str(), lastClass.c_str(), dictEncodeSimple(lastMetadata).c_str());
+    log_debug("Received chain: {} -> {} ({}) [{}]", chain.c_str(), newChain.c_str(), lastClass.c_str(), dictEncodeSimple(lastMetadata).c_str());
     // copy artist to album artist if empty
     const auto aaItm = lastMetadata.find(MetadataHandler::getMetaFieldName(M_ALBUMARTIST));
     const auto taItm = lastMetadata.find(MetadataHandler::getMetaFieldName(M_ARTIST));
@@ -1077,40 +1090,62 @@ int ContentManager::addContainerChain(const std::string& chain, const std::strin
             lastMetadata.erase(itm);
         }
     }
+    int containerID = INVALID_OBJECT_ID;
     database->addContainerChain(newChain, lastClass, lastRefID, &containerID, updateID, lastMetadata);
 
-    if (!updateID.empty() && origObj != nullptr) {
-        int count = 0;
-        for (auto contId : updateID) {
-            auto container = database->loadObject(contId);
-
-            MetadataHandler::createHandler(context, CH_CONTAINERART)->fillMetadata(container);
-            const std::vector<std::shared_ptr<CdsResource>>& resources = container->getResources();
-            auto fanart = std::find_if(resources.begin(), resources.end(), [=](const auto& res) { return res->isMetaResource(ID3_ALBUM_ART); });
-            auto location = container->getLocation().string();
-
-            if (fanart == resources.end() && count < config->getIntOption(CFG_IMPORT_RESOURCES_CONTAINERART_PARENTCOUNT) && container->getParentID() != CDS_ID_ROOT && std::count(location.begin(), location.end(), '/') > config->getIntOption(CFG_IMPORT_RESOURCES_CONTAINERART_PARENTCOUNT)) {
-                const std::vector<std::shared_ptr<CdsResource>>& origResources = origObj->getResources();
-                fanart = std::find_if(origResources.begin(), origResources.end(), [=](const auto& res) { return res->isMetaResource(ID3_ALBUM_ART); });
-                if (fanart != origResources.end()) {
-                    if ((*fanart)->getAttribute(R_RESOURCE_FILE).empty()) {
-                        (*fanart)->addAttribute(R_FANART_OBJ_ID, std::to_string(origObj->getID()));
-                        (*fanart)->addAttribute(R_FANART_RES_ID, std::to_string(fanart - origResources.begin()));
-                    }
-                    container->addResource(*fanart);
-                }
-            }
-            int containerChanged = INVALID_OBJECT_ID;
-            database->updateObject(container, &containerChanged);
-            count++;
-        }
-    }
     if (!updateID.empty()) {
+        assignFanArt(updateID, origObj);
         update_manager->containerChanged(updateID.back());
         session_manager->containerChangedUI(updateID.back());
     }
 
     return containerID;
+}
+
+void ContentManager::assignFanArt(const std::vector<int>& containerIds, const std::shared_ptr<CdsObject>& origObj)
+{
+    if (origObj != nullptr) {
+        int count = 0;
+        for (const auto& contId : containerIds) {
+            auto container = database->loadObject(contId);
+
+            const std::vector<std::shared_ptr<CdsResource>>& resources = container->getResources();
+            auto fanart = std::find_if(resources.begin(), resources.end(), [=](const auto& res) { return res->isMetaResource(ID3_ALBUM_ART); });
+            if (fanart == resources.end()) {
+                MetadataHandler::createHandler(context, CH_CONTAINERART)->fillMetadata(container);
+                int containerChanged = INVALID_OBJECT_ID;
+                database->updateObject(container, &containerChanged);
+                fanart = std::find_if(resources.begin(), resources.end(), [=](const auto& res) { return res->isMetaResource(ID3_ALBUM_ART); });
+            }
+            auto location = container->getLocation().string();
+            if (fanart != resources.end() && (*fanart)->getHandlerType() != CH_CONTAINERART) {
+                // remove stale references
+                auto fanartObjId = stoiString((*fanart)->getAttribute(R_FANART_OBJ_ID));
+                try {
+                    if (fanartObjId > 0) {
+                        database->loadObject(fanartObjId);
+                    }
+                } catch (const ObjectNotFoundException& e) {
+                    container->removeResource((*fanart)->getHandlerType());
+                    fanart = resources.end();
+                }
+            }
+            if (fanart == resources.end() && (origObj->isContainer() || (count < config->getIntOption(CFG_IMPORT_RESOURCES_CONTAINERART_PARENTCOUNT) && container->getParentID() != CDS_ID_ROOT && std::count(location.begin(), location.end(), '/') > config->getIntOption(CFG_IMPORT_RESOURCES_CONTAINERART_MINDEPTH)))) {
+                const std::vector<std::shared_ptr<CdsResource>>& origResources = origObj->getResources();
+                fanart = std::find_if(origResources.begin(), origResources.end(), [=](const auto& res) { return res->isMetaResource(ID3_ALBUM_ART); });
+                if (fanart != origResources.end()) {
+                    if ((*fanart)->getAttribute(R_RESOURCE_FILE).empty()) {
+                        (*fanart)->addAttribute(R_FANART_OBJ_ID, fmt::to_string(origObj->getID() != INVALID_OBJECT_ID ? origObj->getID() : origObj->getRefID()));
+                        (*fanart)->addAttribute(R_FANART_RES_ID, fmt::to_string(fanart - origResources.begin()));
+                    }
+                    container->addResource(*fanart);
+                }
+                int containerChanged = INVALID_OBJECT_ID;
+                database->updateObject(container, &containerChanged);
+            }
+            count++;
+        }
+    }
 }
 
 void ContentManager::updateObject(const std::shared_ptr<CdsObject>& obj, bool send_updates)
@@ -1137,7 +1172,7 @@ bool ContentManager::isLink(const fs::path& path, bool allowLinks)
         int lret = lstat(path.c_str(), &statbuf);
 
         if (lret != 0) {
-            log_warning("File or directory does not exist: {} ({})", path.string(), strerror(errno));
+            log_warning("File or directory does not exist: {} ({})", path.c_str(), std::strerror(errno));
             return true;
         }
 
@@ -1154,7 +1189,7 @@ std::shared_ptr<CdsObject> ContentManager::createObjectFromFile(const fs::path& 
     struct stat statbuf;
     int ret = stat(path.c_str(), &statbuf);
     if (ret != 0) {
-        log_warning("File or directory does not exist: {} ({})", path.string(), strerror(errno));
+        log_warning("File or directory does not exist: {} ({})", path.c_str(), std::strerror(errno));
         return nullptr;
     }
 
@@ -1164,15 +1199,9 @@ std::shared_ptr<CdsObject> ContentManager::createObjectFromFile(const fs::path& 
     std::shared_ptr<CdsObject> obj;
     if (S_ISREG(statbuf.st_mode) || (allow_fifo && S_ISFIFO(statbuf.st_mode))) { // item
         /* retrieve information about item and decide if it should be included */
-        std::string mimetype = mime->extensionToMimeType(path);
+        std::string mimetype = mime->getMimeType(path, MIMETYPE_DEFAULT);
         if (mimetype.empty()) {
-            if (ignore_unknown_extensions) {
-                // item should be ignored
-                return nullptr;
-            }
-#ifdef HAVE_MAGIC
-            mimetype = mime->fileToMimeType(path);
-#endif
+            return nullptr;
         }
         log_debug("Mime '{}' for file {}", mimetype, path.c_str());
 
@@ -1218,7 +1247,7 @@ std::shared_ptr<CdsObject> ContentManager::createObjectFromFile(const fs::path& 
         */
     } else {
         // only regular files and directories are supported
-        throw_std_runtime_error("ContentManager: skipping file " + path.string());
+        throw_std_runtime_error("ContentManager: skipping file {}", path.c_str());
     }
     //    auto f2i = StringConverter::f2i();
     //    obj->setTitle(f2i->convert(filename));
@@ -1369,7 +1398,7 @@ int ContentManager::addFileInternal(
     if (async) {
         auto self = shared_from_this();
         auto task = std::make_shared<CMAddFileTask>(self, path, rootpath, asSetting, cancellable);
-        task->setDescription("Importing: " + path.string());
+        task->setDescription(fmt::format("Importing: {}", path.c_str()));
         task->setParentID(parentTaskID);
         addTask(task, lowPriority);
         return INVALID_OBJECT_ID;
@@ -1406,9 +1435,8 @@ void ContentManager::cleanupOnlineServiceObjects(const std::shared_ptr<OnlineSer
     if (service->getItemPurgeInterval() > 0) {
         auto ids = database->getServiceObjectIDs(service->getDatabasePrefix());
 
-        struct timespec current, last;
-        getTimespecNow(&current);
-        last.tv_nsec = 0;
+        auto current = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        int64_t last = 0;
         std::string temp;
 
         for (int object_id : *ids) {
@@ -1420,9 +1448,9 @@ void ContentManager::cleanupOnlineServiceObjects(const std::shared_ptr<OnlineSer
             if (temp.empty())
                 continue;
 
-            last.tv_sec = std::stol(temp);
+            last = std::stoll(temp);
 
-            if ((service->getItemPurgeInterval() > 0) && ((current.tv_sec - last.tv_sec) > service->getItemPurgeInterval())) {
+            if ((service->getItemPurgeInterval() > 0) && ((current - last) > service->getItemPurgeInterval())) {
                 log_debug("Purging old online service object {}", obj->getTitle().c_str());
                 removeObject(nullptr, object_id, false);
             }
@@ -1599,6 +1627,8 @@ void ContentManager::removeAutoscanDirectory(const std::shared_ptr<AutoscanDirec
     if (adir == nullptr)
         throw_std_runtime_error("can not remove autoscan directory - was not an autoscan");
 
+    adir->setTaskCount(-1);
+
     if (adir->getScanMode() == ScanMode::Timed) {
         autoscan_timed->remove(adir->getScanID());
         database->removeAutoscanDirectory(adir);
@@ -1772,6 +1802,8 @@ CMAddFileTask::CMAddFileTask(std::shared_ptr<ContentManager> content,
 {
     this->cancellable = cancellable;
     this->taskType = AddFile;
+    if (this->asSetting.adir != nullptr)
+        this->asSetting.adir->incTaskCount();
 }
 
 fs::path CMAddFileTask::getPath() { return path; }
@@ -1783,6 +1815,13 @@ void CMAddFileTask::run()
     log_debug("running add file task with path {} recursive: {}", path.c_str(), asSetting.recursive);
     auto self = shared_from_this();
     content->_addFile(path, rootpath, asSetting, self);
+    if (asSetting.adir != nullptr) {
+        asSetting.adir->decTaskCount();
+        if (asSetting.adir->updateLMT()) {
+            log_debug("CMAddFileTask::run: Updating last_modified for autoscan directory {}", asSetting.adir->getLocation().c_str());
+            content->getContext()->getDatabase()->updateAutoscanDirectory(asSetting.adir);
+        }
+    }
 }
 
 CMRemoveObjectTask::CMRemoveObjectTask(std::shared_ptr<ContentManager> content, std::shared_ptr<AutoscanDirectory> adir,
@@ -1822,9 +1861,9 @@ void CMRescanDirectoryTask::run()
     auto self = shared_from_this();
     content->_rescanDirectory(adir, containerID, self);
     adir->decTaskCount();
-
-    if (adir->getTaskCount() == 0) {
-        adir->updateLMT();
+    if (adir->updateLMT()) {
+        log_debug("CMRescanDirectoryTask::run: Updating last_modified for autoscan directory {}", adir->getLocation().c_str());
+        content->getContext()->getDatabase()->updateAutoscanDirectory(adir);
     }
 }
 

@@ -325,7 +325,7 @@ void web::configLoad::process()
             if (!fourCCList.empty()) {
                 item = values.append_child("item");
                 createItem(item, cs->getItemPath(pr, ATTR_TRANSCODING_PROFILES_PROFLE, ATTR_TRANSCODING_PROFILES_PROFLE_AVI4CC, ATTR_TRANSCODING_PROFILES_PROFLE_AVI4CC_4CC), cs->option, ATTR_TRANSCODING_PROFILES_PROFLE_AVI4CC_4CC);
-                setValue(item, std::accumulate(std::next(fourCCList.begin()), fourCCList.end(), fourCCList[0], [](const std::string& a, const std::string& b) { return a + ", " + b; }));
+                setValue(item, std::accumulate(std::next(fourCCList.begin()), fourCCList.end(), fourCCList[0], [](const std::string& a, const std::string& b) { return fmt::format("{}, {}", a.c_str(), b.c_str()); }));
             }
         }
         pr++;
@@ -365,6 +365,10 @@ void web::configLoad::process()
             item = values.append_child("item");
             createItem(item, cs->getItemPath(i, ATTR_AUTOSCAN_DIRECTORY_SCANCOUNT), cs->option, ATTR_AUTOSCAN_DIRECTORY_SCANCOUNT);
             setValue(item, adir->getActiveScanCount());
+
+            item = values.append_child("item");
+            createItem(item, cs->getItemPath(i, ATTR_AUTOSCAN_DIRECTORY_TASKCOUNT), cs->option, ATTR_AUTOSCAN_DIRECTORY_TASKCOUNT);
+            setValue(item, adir->getTaskCount());
 
             item = values.append_child("item");
             createItem(item, cs->getItemPath(i, ATTR_AUTOSCAN_DIRECTORY_LMT), cs->option, ATTR_AUTOSCAN_DIRECTORY_LMT);
@@ -431,7 +435,7 @@ void web::configLoad::process()
     for (const auto& entry : dbEntries) {
         auto exItem = allItems.find(entry.item);
         if (exItem != allItems.end()) {
-            auto item = (*exItem).second;
+            auto item = exItem->second;
             item->attribute("source") = "database";
             item->attribute("status") = entry.status.c_str();
         } else {
