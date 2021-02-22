@@ -25,11 +25,8 @@ int PyImportScript::addCdsObject(const std::shared_ptr<CdsObject>& orgObj, CdsOb
         obj.copyTo(toBeAdded);
         toBeAdded->setVirtual(true);
 
-        std::stringstream stream;
-        stream << '/';
-        copy(chain.begin(), chain.end(), std::ostream_iterator<std::string>(stream, "/"));
-
-        int parentId = getContent()->addContainerChain(stream.str(), containerclass, INVALID_OBJECT_ID, orgObj);
+        auto path = std::string("/").append(fmt::format("{}", fmt::join(chain, "/")));
+        int parentId = getContent()->addContainerChain(path, containerclass, INVALID_OBJECT_ID, orgObj);
         toBeAdded->setParentID(parentId);
         toBeAdded->setRefID(orgObj->getID());
         toBeAdded->setFlag(OBJECT_FLAG_USE_RESOURCE_REF);

@@ -39,13 +39,11 @@ TEST_F(PyRuntimeTest, CheckPythonScript_JPG)
 
     std::vector<std::string> result;
     runtime.processCdsObject(item, "/path", [this, &result](CdsObject& obj, const std::vector<std::string>& chain, std::string containerclass) {
-        std::stringstream stream;
-        copy(chain.begin(), chain.end(), std::ostream_iterator<std::string>(stream, "/"));
-        result.push_back(stream.str());
+        result.push_back(fmt::format("/{}", chain));
         return 1;
     });
     
-    ASSERT_THAT(result, testing::UnorderedElementsAre("Pictures/Date/2021/02/", "Pictures/Directories/to/"));
+    ASSERT_THAT(result, testing::UnorderedElementsAre("Pictures/Date/2021/02", "Pictures/Directories/to"));
 }
 
 TEST_F(PyRuntimeTest, CheckPythonScript_Mp3)
@@ -70,9 +68,7 @@ TEST_F(PyRuntimeTest, CheckPythonScript_Mp3)
     std::vector<std::string> result;
     int checks = 0;
     runtime.processCdsObject(item, "/path", [this, &result, &checks](CdsObject& obj, const std::vector<std::string>& chain, std::string containerclass) {
-        std::stringstream stream;
-        copy(chain.begin(), chain.end(), std::ostream_iterator<std::string>(stream, "/"));
-        result.push_back(stream.str());
+        result.push_back(fmt::format("/{}", chain));
 
         if (chain.back().compare("All - full name") == 0 && obj.getTitle().compare("C++Artist - C++Album - C++Titel") == 0)
             checks++;
@@ -85,15 +81,15 @@ TEST_F(PyRuntimeTest, CheckPythonScript_Mp3)
     ASSERT_EQ(checks, 4);
 
     std::string expected[] = { 
-        "Audio/All Audio/",
-        "Audio/Artists/C++Artist/All Songs/",
-        "Audio/All - full name/",
-        "Audio/Artists/C++Artist/All - full name/",
-        "Audio/Artists/C++Artist/C++Album/",
-        "Audio/Albums/C++Album/",
-        "Audio/Genres/C++Genre/",
-        "Audio/Year/2021/",
-        "Audio/Composers/C++Composer/"
+        "/Audio/All Audio",
+        "/Audio/Artists/C++Artist/All Songs",
+        "/Audio/All - full name",
+        "/Audio/Artists/C++Artist/All - full name",
+        "/Audio/Artists/C++Artist/C++Album",
+        "/Audio/Albums/C++Album",
+        "/Audio/Genres/C++Genre",
+        "/Audio/Year/2021",
+        "/Audio/Composers/C++Composer"
     };
     ASSERT_THAT(result, testing::UnorderedElementsAreArray(expected));
 }
