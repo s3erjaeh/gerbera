@@ -39,11 +39,11 @@ TEST_F(PyRuntimeTest, CheckPythonScript_JPG)
 
     std::vector<std::string> result;
     runtime.processCdsObject(item, "/path", [this, &result](CdsObject& obj, const std::vector<std::string>& chain, std::string containerclass) {
-        result.push_back(fmt::format("/{}", chain));
+        result.push_back("/" + fmt::format("{}", fmt::join(chain,"/")));
         return 1;
     });
     
-    ASSERT_THAT(result, testing::UnorderedElementsAre("Pictures/Date/2021/02", "Pictures/Directories/to"));
+    ASSERT_THAT(result, testing::UnorderedElementsAre("/Pictures/Date/2021/02", "/Pictures/Directories/to"));
 }
 
 TEST_F(PyRuntimeTest, CheckPythonScript_Mp3)
@@ -68,7 +68,7 @@ TEST_F(PyRuntimeTest, CheckPythonScript_Mp3)
     std::vector<std::string> result;
     int checks = 0;
     runtime.processCdsObject(item, "/path", [this, &result, &checks](CdsObject& obj, const std::vector<std::string>& chain, std::string containerclass) {
-        result.push_back(fmt::format("/{}", chain));
+        result.push_back("/" + fmt::format("{}", fmt::join(chain, "/")));
 
         if (chain.back().compare("All - full name") == 0 && obj.getTitle().compare("C++Artist - C++Album - C++Titel") == 0)
             checks++;
