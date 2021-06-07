@@ -35,4 +35,3 @@ doc
 gerbera-web
 conanfile.py
 *.md
-Dockerfile
