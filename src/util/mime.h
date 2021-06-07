@@ -45,14 +45,18 @@ class Config;
 class Mime {
 public:
     explicit Mime(const std::shared_ptr<Config>& config);
+#ifdef HAVE_MAGIC
     virtual ~Mime();
 
-#ifdef HAVE_MAGIC
+    Mime(const Mime&) = delete;
+    Mime& operator=(const Mime&) = delete;
+
     /// \brief Extracts mimetype from a buffer using filemagic
     std::string bufferToMimeType(const void* buffer, size_t length);
+#else
+    virtual ~Mime() = default;
 #endif // HAVE_MAGIC
 
-    std::string extensionToMimeType(const fs::path& path, const std::string& defval = "");
     std::string mimeTypeToUpnpClass(const std::string& mimeType);
     std::string getMimeType(const fs::path& path, const std::string& defval = "");
 

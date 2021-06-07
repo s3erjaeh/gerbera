@@ -83,7 +83,7 @@ public:
 
     /// \brief sets the program name, i.e. the command line name of the
     /// transcoder that will be executed.
-    void setCommand(fs::path command) { this->command = std::move(command); }
+    void setCommand(const fs::path& command) { this->command = command; }
 
     /// \brief gets the transcoders program name
     fs::path getCommand() const { return command; }
@@ -172,10 +172,6 @@ public:
     void setEnabled(bool new_enabled) { enabled = new_enabled; }
     bool getEnabled() const { return enabled; }
 
-    /// \brief Send out the data in chunked encoding
-    void setChunked(bool chunked) { force_chunked = chunked; }
-    bool getChunked() const { return force_chunked; }
-
     /// \brief Sample frequency handling
     void setSampleFreq(int freq) { sample_frequency = freq; }
     int getSampleFreq() const { return sample_frequency; }
@@ -191,30 +187,28 @@ protected:
     std::string tm;
     fs::path command;
     std::string args;
-    bool enabled;
-    bool first_resource;
-    bool theora;
-    bool accept_url;
-    bool hide_orig_res;
-    bool thumbnail;
-    bool force_chunked;
-    size_t buffer_size;
-    size_t chunk_size;
-    size_t initial_fill_size;
+    bool enabled { true };
+    bool first_resource { false };
+    bool theora { false };
+    bool accept_url { true };
+    bool hide_orig_res { false };
+    bool thumbnail { false };
+    bool force_chunked { true };
+    size_t buffer_size {};
+    size_t chunk_size {};
+    size_t initial_fill_size {};
     transcoding_type_t tr_type;
-    int number_of_channels;
-    int sample_frequency;
+    int number_of_channels { SOURCE };
+    int sample_frequency { SOURCE };
     std::map<std::string, std::string> attributes;
     std::vector<std::string> fourcc_list;
-    avi_fourcc_listmode_t fourcc_mode;
-    TranscodingProfile();
+    avi_fourcc_listmode_t fourcc_mode { FCC_None };
 };
 
 /// \brief this class allows access to available transcoding profiles.
 using TranscodingProfileMap = std::map<std::string, std::shared_ptr<TranscodingProfile>>;
 class TranscodingProfileList {
 public:
-    TranscodingProfileList();
     void add(const std::string& sourceMimeType, const std::shared_ptr<TranscodingProfile>& prof);
 
     std::shared_ptr<TranscodingProfileMap> get(const std::string& sourceMimeType);

@@ -36,7 +36,6 @@
 #include <fcntl.h>
 #include <sys/select.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include "content/content_manager.h"
 #include "util/process.h"
@@ -49,8 +48,8 @@
 
 ProcListItem::ProcListItem(std::shared_ptr<Executor> exec, bool abortOnDeath)
     : executor(std::move(exec))
+    , abort(abortOnDeath)
 {
-    abort = abortOnDeath;
 }
 
 std::shared_ptr<Executor> ProcListItem::getExecutor()
@@ -66,13 +65,13 @@ bool ProcListItem::abortOnDeath() const
 bool ProcessIOHandler::abort() const
 {
     return std::any_of(procList.begin(), procList.end(),
-        [=](const auto& proc) { auto exec = proc->getExecutor();
+        [=](auto&& proc) { auto exec = proc->getExecutor();
             return exec != nullptr && !exec->isAlive() && proc->abortOnDeath(); });
 }
 
 void ProcessIOHandler::killAll() const
 {
-    for (const auto& i : procList) {
+    for (auto&& i : procList) {
         auto exec = i->getExecutor();
         if (exec != nullptr)
             exec->kill();
@@ -84,7 +83,7 @@ void ProcessIOHandler::registerAll()
     if (mainProc != nullptr)
         content->registerExecutor(mainProc);
 
-    for (const auto& i : procList) {
+    for (auto&& i : procList) {
         auto exec = i->getExecutor();
         if (exec != nullptr)
             content->registerExecutor(exec);
@@ -96,7 +95,7 @@ void ProcessIOHandler::unregisterAll()
     if (mainProc != nullptr)
         content->unregisterExecutor(mainProc);
 
-    for (const auto& i : procList) {
+    for (auto&& i : procList) {
         auto exec = i->getExecutor();
         if (exec != nullptr)
             content->unregisterExecutor(exec);
@@ -104,17 +103,16 @@ void ProcessIOHandler::unregisterAll()
 }
 
 ProcessIOHandler::ProcessIOHandler(std::shared_ptr<ContentManager> content,
-    const fs::path& filename,
+    fs::path filename,
     const std::shared_ptr<Executor>& mainProc,
     std::vector<std::shared_ptr<ProcListItem>> procList,
     bool ignoreSeek)
+    : content(std::move(content))
+    , procList(std::move(procList))
+    , mainProc(mainProc)
+    , filename(std::move(filename))
+    , ignoreSeek(ignoreSeek)
 {
-    this->content = std::move(content);
-    this->filename = filename;
-    this->procList = std::move(procList);
-    this->mainProc = mainProc;
-    this->ignoreSeek = ignoreSeek;
-
     if ((mainProc != nullptr) && ((!mainProc->isAlive() || abort()))) {
         killAll();
         throw_std_runtime_error("process terminated early");
@@ -163,7 +161,7 @@ void ProcessIOHandler::open(enum UpnpOpenFileMode mode)
         killAll();
         if (mainProc != nullptr)
             mainProc->kill();
-        unlink(filename.c_str());
+        fs::remove(filename);
         throw_std_runtime_error("open: failed to open: {}", filename.c_str());
     }
 }
@@ -246,13 +244,10 @@ size_t ProcessIOHandler::read(char* buf, size_t length)
         ret = -1;
 
         if (mainProc != nullptr) {
-            if (!mainProc->isAlive()) {
-                if (mainProc->getStatus() == EXIT_SUCCESS)
-                    ret = 0;
-
-            } else {
+            if (mainProc->isAlive())
                 mainProc->kill();
-            }
+            if (mainProc->getStatus() == EXIT_SUCCESS)
+                ret = 0;
         } else
             ret = 0;
 
@@ -374,7 +369,7 @@ void ProcessIOHandler::close()
 
     ::close(fd);
 
-    unlink(filename.c_str());
+    fs::remove(filename);
 
     if (!ret)
         throw_std_runtime_error("failed to kill process");

@@ -63,7 +63,7 @@ void web::containers::process()
 
     auto param = std::make_unique<BrowseParam>(parentID, BROWSE_DIRECT_CHILDREN | BROWSE_CONTAINERS);
     auto arr = database->browse(param);
-    for (const auto& obj : arr) {
+    for (auto&& obj : arr) {
         //if (obj->isContainer())
         //{
         auto cont = std::static_pointer_cast<CdsContainer>(obj);
@@ -72,7 +72,7 @@ void web::containers::process()
         int childCount = cont->getChildCount();
         ce.append_attribute("child_count") = childCount;
         int autoscanType = cont->getAutoscanType();
-        ce.append_attribute("autoscan_type") = mapAutoscanType(autoscanType).c_str();
+        ce.append_attribute("autoscan_type") = mapAutoscanType(autoscanType).data();
 
         std::string url;
         if (UpnpXMLBuilder::renderContainerImage(server->getVirtualUrl(), cont, url)) {

@@ -61,22 +61,21 @@ protected:
     unsigned int flags;
     int objectID;
 
-    int startingIndex;
-    int requestedCount;
+    int startingIndex {};
+    int requestedCount {};
+    std::string sortCrit;
 
     // output parameters
-    int totalMatches;
+    int totalMatches {};
 
 public:
     BrowseParam(int objectID, unsigned int flags)
+        : flags(flags)
+        , objectID(objectID)
     {
-        this->objectID = objectID;
-        this->flags = flags;
-        startingIndex = 0;
-        requestedCount = 0;
     }
 
-    int getFlags() const { return flags; }
+    unsigned int getFlags() const { return flags; }
     unsigned int getFlag(unsigned int mask) const { return flags & mask; }
     void setFlags(unsigned int flags) { this->flags = flags; }
     void setFlag(unsigned int mask) { flags |= mask; }
@@ -106,10 +105,15 @@ public:
         this->requestedCount = requestedCount;
     }
 
+    void setSortCriteria(const std::string& sortCrit)
+    {
+        this->sortCrit = sortCrit;
+    }
+
     int getStartingIndex() const { return startingIndex; }
     int getRequestedCount() const { return requestedCount; }
-
     int getTotalMatches() const { return totalMatches; }
+    const std::string& getSortCriteria() const { return sortCrit; }
 
     void setTotalMatches(int totalMatches)
     {
@@ -121,14 +125,16 @@ class SearchParam {
 protected:
     std::string containerID;
     std::string searchCrit;
+    std::string sortCrit;
     int startingIndex;
     int requestedCount;
 
 public:
-    SearchParam(std::string containerID, std::string searchCriteria, int startingIndex,
+    SearchParam(std::string containerID, std::string searchCriteria, std::string sortCriteria, int startingIndex,
         int requestedCount)
         : containerID(std::move(containerID))
         , searchCrit(std::move(searchCriteria))
+        , sortCrit(std::move(sortCriteria))
         , startingIndex(startingIndex)
         , requestedCount(requestedCount)
     {
@@ -136,6 +142,7 @@ public:
     const std::string& searchCriteria() const { return searchCrit; }
     int getStartingIndex() const { return startingIndex; }
     int getRequestedCount() const { return requestedCount; }
+    const std::string& getSortCriteria() const { return sortCrit; }
 };
 
 class Database {
@@ -209,8 +216,6 @@ public:
     /* utility methods */
     virtual std::shared_ptr<CdsObject> loadObject(int objectID) = 0;
     virtual int getChildCount(int contId, bool containers = true, bool items = true, bool hideFsRoot = false) = 0;
-
-    virtual std::string findFolderImage(int id, std::string trackArtBase) = 0;
 
     class ChangedContainers {
     public:

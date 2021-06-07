@@ -42,9 +42,12 @@
 /// \brief an executor which runs a thread
 class ThreadExecutor : public Executor {
 public:
-    /// \brief initialize the mutex and the cond
     ThreadExecutor() = default;
     ~ThreadExecutor() override;
+
+    ThreadExecutor(const ThreadExecutor&) = delete;
+    ThreadExecutor& operator=(const ThreadExecutor&) = delete;
+
     bool isAlive() override { return threadRunning; }
 
     /// \brief kill the thread (pthread_join)
@@ -57,24 +60,23 @@ public:
 protected:
     bool threadShutdown { false };
     /// \brief if the thread is currently running
-    bool threadRunning;
+    bool threadRunning {};
 
     std::condition_variable cond;
     std::mutex mutex;
+    pthread_t thread { 0 };
 
     /// \brief abstract thread method, which needs to be overridden
     virtual void threadProc() = 0;
 
     /// \brief start the thread
-    void startThread();
+    virtual void startThread();
 
     /// \brief check if the thread should shutdown
     /// should be called by the threadProc in short intervals
     bool threadShutdownCheck() const { return threadShutdown; }
 
 private:
-    pthread_t thread { 0 };
-
     static void* staticThreadProc(void* arg);
 };
 

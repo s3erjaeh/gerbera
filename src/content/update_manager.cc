@@ -39,16 +39,16 @@
 #include "upnp_cds.h"
 #include "util/tools.h"
 
-/* following constants in milliseconds */
-#define SPEC_INTERVAL 2000
-#define MIN_SLEEP 1
+static constexpr auto SPEC_INTERVAL = std::chrono::seconds(2);
+static constexpr auto MIN_SLEEP = std::chrono::milliseconds(1);
 
 #define MAX_OBJECT_IDS 1000
 #define MAX_OBJECT_IDS_OVERLOAD 30
 #define OBJECT_ID_HASH_CAPACITY 3109
 
-UpdateManager::UpdateManager(std::shared_ptr<Database> database, std::shared_ptr<Server> server)
-    : database(std::move(database))
+UpdateManager::UpdateManager(std::shared_ptr<Config> config, std::shared_ptr<Database> database, std::shared_ptr<Server> server)
+    : config(std::move(config))
+    , database(std::move(database))
     , server(std::move(server))
     , objectIDHash(std::make_unique<std::unordered_set<int>>())
     , shutdownFlag(false)
@@ -59,20 +59,9 @@ UpdateManager::UpdateManager(std::shared_ptr<Database> database, std::shared_ptr
 
 void UpdateManager::run()
 {
-    /*
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    */
-
-    pthread_create(
-        &updateThread,
-        nullptr, // &attr, // attr
-        UpdateManager::staticThreadProc,
-        this);
-
-    //cond->wait();
-    //pthread_attr_destroy(&attr);
+    threadRunner = std::make_unique<StdThreadRunner>("UpdateThread", UpdateManager::staticThreadProc, this, config);
+    // wait for thread to become ready
+    threadRunner->waitForReady();
 }
 
 UpdateManager::~UpdateManager() { log_debug("UpdateManager destroyed"); }
@@ -80,21 +69,20 @@ UpdateManager::~UpdateManager() { log_debug("UpdateManager destroyed"); }
 void UpdateManager::shutdown()
 {
     log_debug("start");
-    AutoLockU lock(mutex);
+    auto lock = threadRunner->uniqueLock();
     shutdownFlag = true;
+
     log_debug("signalling...");
-    cond.notify_one();
+    threadRunner->notify();
     lock.unlock();
-    log_debug("waiting for thread");
-    if (updateThread)
-        pthread_join(updateThread, nullptr);
-    updateThread = 0;
+
+    threadRunner->join();
     log_debug("end");
 }
 
 void UpdateManager::containersChanged(const std::vector<int>& objectIDs, int flushPolicy)
 {
-    AutoLockU lock(mutex);
+    auto lock = threadRunner->uniqueLock();
     // signalling thread if it could have been idle, because
     // there were no unprocessed updates
     bool signal = (!haveUpdates());
@@ -115,7 +103,7 @@ void UpdateManager::containersChanged(const std::vector<int>& objectIDs, int flu
             if (split && objectIDHash->size() > MAX_OBJECT_IDS) {
                 while (objectIDHash->size() > MAX_OBJECT_IDS) {
                     log_debug("in-between signalling...");
-                    cond.notify_one();
+                    threadRunner->notify();
                     lock.unlock();
                     lock.lock();
                 }
@@ -126,7 +114,7 @@ void UpdateManager::containersChanged(const std::vector<int>& objectIDs, int flu
         signal = true;
     if (signal) {
         log_debug("signalling...");
-        cond.notify_one();
+        threadRunner->notify();
     }
 }
 
@@ -134,7 +122,9 @@ void UpdateManager::containerChanged(int objectID, int flushPolicy)
 {
     if (objectID == INVALID_OBJECT_ID)
         return;
-    AutoLock lock(mutex);
+
+    auto lock = threadRunner->lockGuard();
+
     if (objectID != lastContainerChanged || flushPolicy > this->flushPolicy) {
         // signalling thread if it could have been idle, because
         // there were no unprocessed updates
@@ -157,7 +147,7 @@ void UpdateManager::containerChanged(int objectID, int flushPolicy)
         }
         if (signal) {
             log_debug("signalling...");
-            cond.notify_one();
+            threadRunner->notify();
         }
     } else {
         log_debug("last container changed!");
@@ -168,32 +158,33 @@ void UpdateManager::containerChanged(int objectID, int flushPolicy)
 
 void UpdateManager::threadProc()
 {
-    struct timespec lastUpdate;
-    getTimespecNow(&lastUpdate);
+    StdThreadRunner::waitFor("UpdateManager", [this] { return threadRunner != nullptr; });
 
-    AutoLockU lock(mutex);
-    //cond.notify_one();
+    auto lock = threadRunner->uniqueLockS("threadProc");
+    // tell run() that we are ready
+    threadRunner->setReady();
+
+    auto lastUpdate = currentTimeMS();
     while (!shutdownFlag) {
         if (haveUpdates()) {
-            long sleepMillis = 0;
-            struct timespec now;
-            getTimespecNow(&now);
-            long timeDiff = getDeltaMillis(&lastUpdate, &now);
+            std::chrono::milliseconds sleepMillis {};
+            auto now = currentTimeMS();
+            auto timeDiff = getDeltaMillis(lastUpdate, now);
             switch (flushPolicy) {
             case FLUSH_SPEC:
                 sleepMillis = SPEC_INTERVAL - timeDiff;
                 break;
             case FLUSH_ASAP:
-                sleepMillis = 0;
+                sleepMillis = {};
                 break;
             }
             bool sendUpdates = true;
             if (sleepMillis >= MIN_SLEEP && objectIDHash->size() < MAX_OBJECT_IDS) {
-                struct timespec timeout;
-                getTimespecAfterMillis(sleepMillis, &timeout, &now);
-                log_debug("threadProc: sleeping for {} millis", sleepMillis);
+                std::chrono::milliseconds timeout;
+                getTimespecAfterMillis(sleepMillis, timeout);
 
-                std::cv_status ret = cond.wait_for(lock, std::chrono::milliseconds(sleepMillis));
+                log_debug("threadProc: sleeping for {} millis", sleepMillis.count());
+                auto ret = threadRunner->waitFor(lock, sleepMillis);
 
                 if (!shutdownFlag) {
                     if (ret == std::cv_status::timeout)
@@ -221,7 +212,7 @@ void UpdateManager::threadProc()
                     try {
                         log_debug("updates sent: \"{}\"", updateString.c_str());
                         server->sendCDSSubscriptionUpdate(updateString);
-                        getTimespecNow(&lastUpdate);
+                        lastUpdate = currentTimeMS();
                     } catch (const std::runtime_error& e) {
                         log_error("Fatal error when sending updates: {}", e.what());
                         log_error("Forcing Gerbera shutdown.");
@@ -234,7 +225,7 @@ void UpdateManager::threadProc()
             }
         } else {
             //nothing to do
-            cond.wait(lock);
+            threadRunner->wait(lock);
         }
     }
 

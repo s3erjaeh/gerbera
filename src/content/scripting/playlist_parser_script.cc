@@ -48,6 +48,9 @@ static duk_ret_t
 js_readln(duk_context* ctx)
 {
     auto self = dynamic_cast<PlaylistParserScript*>(Script::getContextScript(ctx));
+    if (self == nullptr) {
+        return 0;
+    }
 
     std::string line;
 
@@ -83,9 +86,16 @@ js_getCdsObject(duk_context* ctx)
     auto obj = database->findObjectByPath(path);
     if (obj == nullptr) {
         auto cm = self->getContent();
-        obj = cm->createObjectFromFile(path, false);
-        if (obj == nullptr) // object ignored
+        std::error_code ec;
+        auto dirEnt = fs::directory_entry(path, ec);
+        if (!ec) {
+            obj = cm->createObjectFromFile(dirEnt, false);
+        } else {
+            log_error("Failed to read {}: {}", path.c_str(), ec.message());
+        }
+        if (obj == nullptr) { // object ignored
             return 0;
+        }
     }
     self->cdsObject2dukObject(obj);
     return 1;
@@ -96,11 +106,10 @@ js_getCdsObject(duk_context* ctx)
 PlaylistParserScript::PlaylistParserScript(std::shared_ptr<ContentManager> content,
     const std::shared_ptr<ScriptingRuntime>& runtime)
     : Script(std::move(content), runtime, "playlist")
+    , currentHandle(nullptr)
+    , currentObjectID(INVALID_OBJECT_ID)
+    , currentLine(nullptr)
 {
-    currentHandle = nullptr;
-    currentObjectID = INVALID_OBJECT_ID;
-    currentLine = nullptr;
-
     try {
         ScriptingRuntime::AutoLock lock(runtime->getMutex());
         defineFunction("readln", js_readln, 0);
@@ -201,6 +210,4 @@ void PlaylistParserScript::processPlaylistObject(const std::shared_ptr<CdsObject
         gc_counter = 0;
     }
 }
-
-PlaylistParserScript::~PlaylistParserScript() = default;
 #endif // HAVE_JS

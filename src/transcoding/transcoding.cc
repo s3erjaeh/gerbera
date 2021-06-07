@@ -33,41 +33,10 @@
 
 #include "util/tools.h"
 
-TranscodingProfile::TranscodingProfile()
-{
-    enabled = true;
-    first_resource = false;
-    buffer_size = 0;
-    chunk_size = 0;
-    initial_fill_size = 0;
-    tr_type = TR_None;
-    theora = false;
-    accept_url = true;
-    force_chunked = true;
-    hide_orig_res = false;
-    thumbnail = false;
-    sample_frequency = SOURCE; // keep original
-    number_of_channels = SOURCE;
-    fourcc_mode = FCC_None;
-}
-
 TranscodingProfile::TranscodingProfile(transcoding_type_t tr_type, std::string name)
+    : name(std::move(name))
+    , tr_type(tr_type)
 {
-    this->name = std::move(name);
-    this->tr_type = tr_type;
-    enabled = true;
-    theora = false;
-    first_resource = false;
-    accept_url = true;
-    force_chunked = true;
-    hide_orig_res = false;
-    thumbnail = false;
-    sample_frequency = SOURCE; // keep original
-    number_of_channels = SOURCE;
-    buffer_size = 0;
-    chunk_size = 0;
-    initial_fill_size = 0;
-    fourcc_mode = FCC_None;
 }
 
 void TranscodingProfile::setBufferOptions(size_t bs, size_t cs, size_t ifs)
@@ -98,17 +67,14 @@ std::vector<std::string> TranscodingProfile::getAVIFourCCList() const
     return fourcc_list;
 }
 
-TranscodingProfileList::TranscodingProfileList() = default;
-
 void TranscodingProfileList::add(const std::string& sourceMimeType, const std::shared_ptr<TranscodingProfile>& prof)
 {
-    std::shared_ptr<TranscodingProfileMap> inner;
-
     auto it = list.find(sourceMimeType);
-    if (it != list.end())
-        inner = it->second;
-    else
-        inner = std::make_shared<TranscodingProfileMap>();
+    auto inner = [this, it] {
+        if (it != list.end())
+            return it->second;
+        return std::make_shared<TranscodingProfileMap>();
+    }();
 
     inner->insert(std::pair<std::string, std::shared_ptr<TranscodingProfile>>(prof->getName(), prof));
     list[sourceMimeType] = inner;
@@ -124,7 +90,7 @@ std::shared_ptr<TranscodingProfileMap> TranscodingProfileList::get(const std::st
 
 std::shared_ptr<TranscodingProfile> TranscodingProfileList::getByName(const std::string& name, bool getAll)
 {
-    for (const auto& [key, inner] : list) {
+    for (auto&& [key, inner] : list) {
         auto tp = inner->find(name);
         if (tp != inner->end() && (getAll || tp->second->getEnabled()))
             return tp->second;
@@ -141,7 +107,6 @@ std::string TranscodingProfile::mapFourCcMode(avi_fourcc_listmode_t mode)
         return "ignore";
     case FCC_Process:
         return "process";
-    default:
-        return "disabled";
     }
+    return "disabled";
 }

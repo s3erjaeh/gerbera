@@ -48,19 +48,21 @@ void web::add::process()
 
     check_request();
 
-    fs::path path;
     std::string objID = param("object_id");
-    if (objID == "0")
-        path = FS_ROOT_DIRECTORY;
-    else
-        path = hexDecodeString(objID);
+    auto path = fs::path { (objID == "0") ? FS_ROOT_DIRECTORY : hexDecodeString(objID) };
     if (path.empty())
-        throw_std_runtime_error("illegal path");
+        throw_std_runtime_error("Illegal empty path");
 
     AutoScanSetting asSetting;
     asSetting.recursive = true;
     asSetting.mergeOptions(config, path);
 
-    content->addFile(path, asSetting);
+    std::error_code ec;
+    auto dirEnt = fs::directory_entry(path, ec);
+    if (!ec) {
+        content->addFile(dirEnt, asSetting);
+    } else {
+        log_error("Failed to read {}: {}", path.c_str(), ec.message());
+    }
     log_debug("add: returning");
 }

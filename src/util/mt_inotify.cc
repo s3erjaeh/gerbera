@@ -56,12 +56,12 @@
 #define MAX_STRLEN 4096
 
 Inotify::Inotify()
-{
 #ifdef __linux__
-    inotify_fd = inotify_init1(IN_CLOEXEC);
+    : inotify_fd(inotify_init1(IN_CLOEXEC))
 #else
-    inotify_fd = inotify_init();
+    : inotify_fd(inotify_init())
 #endif
+{
     if (inotify_fd < 0)
         throw_std_runtime_error("Unable to initialize inotify");
 
@@ -216,7 +216,7 @@ struct inotify_event* Inotify::nextEvent()
         bytes += this_bytes;
 
         ret = &event[0];
-        first_byte = sizeof(struct inotify_event) + ret->len;
+        first_byte = int(sizeof(struct inotify_event) + ret->len);
         assert(first_byte <= bytes);
 
         if (first_byte == bytes) {

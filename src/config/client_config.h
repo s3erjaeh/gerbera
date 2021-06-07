@@ -40,13 +40,11 @@ class ClientConfig;
 
 class ClientConfigList {
 public:
-    explicit ClientConfigList() = default;
-
     /// \brief Adds a new ClientConfig to the list.
     ///
     /// \param dir ClientConfig to add to the list.
     /// \return scanID of the newly added ClientConfig
-    void add(const std::shared_ptr<ClientConfig>& client, size_t index = SIZE_MAX);
+    void add(const std::shared_ptr<ClientConfig>& client, size_t index = std::numeric_limits<std::size_t>::max());
 
     std::shared_ptr<ClientConfig> get(size_t id, bool edit = false);
 
@@ -61,7 +59,7 @@ public:
     std::vector<std::shared_ptr<ClientConfig>> getArrayCopy();
 
 protected:
-    size_t origSize;
+    size_t origSize {};
     std::map<size_t, std::shared_ptr<ClientConfig>> indexMap;
 
     std::recursive_mutex mutex;
@@ -105,8 +103,8 @@ public:
     void copyTo(const std::shared_ptr<ClientConfig>& copy) const;
 
     /* helpers for clientType stuff */
-    static std::string mapClientType(ClientType clientType);
-    static std::string mapMatchType(ClientMatchType matchType);
+    static std::string_view mapClientType(ClientType clientType);
+    static std::string_view mapMatchType(ClientMatchType matchType);
     static ClientType remapClientType(const std::string& clientType);
     static int remapFlag(const std::string& flag);
     static std::string mapFlags(QuirkFlags flags);

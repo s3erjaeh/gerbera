@@ -32,14 +32,15 @@
 #ifndef __UPDATE_MANAGER_H__
 #define __UPDATE_MANAGER_H__
 
-#include <condition_variable>
 #include <memory>
 #include <unordered_set>
 #include <vector>
 
 #include "common.h"
+#include "util/thread_runner.h"
 
 // forward declaration
+class Config;
 class Database;
 class Server;
 
@@ -48,24 +49,24 @@ class Server;
 
 class UpdateManager {
 public:
-    UpdateManager(std::shared_ptr<Database> database, std::shared_ptr<Server> server);
-    void run();
+    UpdateManager(std::shared_ptr<Config> config, std::shared_ptr<Database> database, std::shared_ptr<Server> server);
     virtual ~UpdateManager();
+
+    UpdateManager(const UpdateManager&) = delete;
+    UpdateManager& operator=(const UpdateManager&) = delete;
+
+    void run();
     void shutdown();
 
     void containerChanged(int objectID, int flushPolicy = FLUSH_SPEC);
     void containersChanged(const std::vector<int>& objectIDs, int flushPolicy = FLUSH_SPEC);
 
 protected:
+    std::shared_ptr<Config> config;
     std::shared_ptr<Database> database;
     std::shared_ptr<Server> server;
 
-    pthread_t updateThread;
-    std::condition_variable cond;
-
-    std::mutex mutex;
-    using AutoLock = std::lock_guard<decltype(mutex)>;
-    using AutoLockU = std::unique_lock<decltype(mutex)>;
+    std::unique_ptr<StdThreadRunner> threadRunner;
 
     std::unique_ptr<std::unordered_set<int>> objectIDHash;
 

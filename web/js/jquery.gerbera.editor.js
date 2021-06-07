@@ -95,6 +95,7 @@
     modal.find('#editClass').val('').prop('disabled', false);
     modal.find('#editDesc').val('').prop('disabled', false);
     modal.find('#editMime').val('').prop('disabled', false);
+    modal.find('#editLmt').val('').prop('disabled', true);
     modal.find('#editProtocol').val('').prop('disabled', false);
     modal.find('#editSave').text('Save Item');
 
@@ -156,6 +157,11 @@
       modal.find('#editObjectType').prop('readonly', true);
       modal.find('#editdObjectIdTxt').text(item.object_id).closest('.form-group').show();
       modal.find('#objectId').val(item.object_id).prop('disabled', true);
+      if ('last_modified' in item && item.last_modified !== '') {
+        modal.find('#editLmt').val(item.last_modified).prop('disabled', true);
+      } else {
+        modal.find('#editLmt').text('').closest('.form-group').hide();
+      }
 
       const metatable = modal.find('#metadata');
       const detailButton = modal.find('#detailbutton');
@@ -165,7 +171,7 @@
         $('<thead><tr><th colspan="2">Metadata</th></tr></thead>').appendTo(metatable);
         tbody = $('<tbody></tbody>');
         for (let i = 0; i < item.metadata.metadata.length; i++) {
-          appendMetaItem(tbody, item.metadata.metadata[i].metaname, item.metadata.metadata[i].metavalue)
+          appendMetaItem(tbody, item.metadata.metadata[i].metaname, item.metadata.metadata[i].metavalue);
         }
         metatable.append(tbody);
       }
@@ -176,7 +182,7 @@
         $('<thead><tr><th colspan="2">Aux Data</th></tr></thead>').appendTo(auxtable);
         tbody = $('<tbody></tbody>');
         for (let i = 0; i < item.auxdata.auxdata.length; i++) {
-          appendMetaItem(tbody, item.auxdata.auxdata[i].auxname, item.auxdata.auxdata[i].auxvalue)
+          appendMetaItem(tbody, item.auxdata.auxdata[i].auxname, item.auxdata.auxdata[i].auxvalue);
         }
         auxtable.append(tbody);
       }
@@ -191,7 +197,7 @@
             restable.append(tbody);
           }
           else {
-            appendMetaItem(tbody, item.resources.resources[i].resname, item.resources.resources[i].resvalue)
+            appendMetaItem(tbody, item.resources.resources[i].resname, item.resources.resources[i].resvalue);
           }
         }
       }
@@ -245,6 +251,18 @@
       .prop('disabled', true)
       .closest('.form-group').show();
 
+    if ('last_modified' in item && item['last_modified'].value !== '') {
+      modal.find('#editLmt')
+        .val(item['last_modified'].value)
+        .prop('disabled', true)
+        .closest('.form-group').show();
+    } else {
+      modal.find('#editLmt')
+        .val('')
+        .prop('disabled', true)
+        .closest('.form-group').hide();
+    }
+
     hideFields([
       modal.find('#editProtocol')
     ]);
@@ -260,6 +278,18 @@
       .val(item.class.value)
       .prop('disabled', true)
       .closest('.form-group').show();
+
+    if ('last_modified' in item && item['last_modified'].value !== '') {
+      modal.find('#editLmt')
+        .val(item['last_modified'].value)
+        .prop('disabled', true)
+        .closest('.form-group').show();
+    } else {
+      modal.find('#editLmt')
+        .text('')
+        .prop('disabled', true)
+        .closest('.form-group').hide();
+    }
 
     hideFields([
       modal.find('#editLocation'),
@@ -315,25 +345,25 @@
       case 'item': {
         item = {
           object_id: objectId.val(),
-          title: editTitle.val(),
-          description: editDesc.val()
+          title: encodeURIComponent(editTitle.val()),
+          description: encodeURIComponent(editDesc.val())
         };
         break;
       }
       case 'container': {
         item = {
           object_id: objectId.val(),
-          title: editTitle.val()
+          title: encodeURIComponent(editTitle.val())
         };
         break;
       }
       case 'external_url': {
         item = {
           object_id: objectId.val(),
-          title: editTitle.val(),
-          description: editDesc.val(),
-          location: editLocation.val(),
-          'mime-type': editMime.val(),
+          title: encodeURIComponent(editTitle.val()),
+          description: encodeURIComponent(editDesc.val()),
+          location: encodeURIComponent(editLocation.val()),
+          'mime-type': encodeURIComponent(editMime.val()),
           protocol: editProtocol.val()
         };
         break;
@@ -359,9 +389,9 @@
           parent_id: parentId.val(),
           obj_type: editObjectType.val(),
           class: editClass.val(),
-          title: editTitle.val(),
-          location: editLocation.val(),
-          description: editDesc.val()
+          title: encodeURIComponent(editTitle.val()),
+          location: encodeURIComponent(editLocation.val()),
+          description: encodeURIComponent(editDesc.val())
         };
         break;
       }
@@ -370,7 +400,7 @@
           parent_id: parentId.val(),
           obj_type: editObjectType.val(),
           class: editClass.val(),
-          title: editTitle.val()
+          title: encodeURIComponent(editTitle.val())
         };
         break;
       }
@@ -379,10 +409,10 @@
           parent_id: parentId.val(),
           obj_type: editObjectType.val(),
           class: editClass.val(),
-          title: editTitle.val(),
-          description: editDesc.val(),
-          location: editLocation.val(),
-          'mime-type': editMime.val(),
+          title: encodeURIComponent(editTitle.val()),
+          description: encodeURIComponent(editDesc.val()),
+          location: encodeURIComponent(editLocation.val()),
+          'mime-type': encodeURIComponent(editMime.val()),
           protocol: editProtocol.val()
         };
         break;

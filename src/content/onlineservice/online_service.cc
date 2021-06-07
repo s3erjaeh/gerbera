@@ -42,11 +42,6 @@
 // NEW SERVICES!
 static constexpr auto service_prefixes = std::array { '\0', 'Y', 'S', 'W', 'T', '\0' };
 
-OnlineServiceList::OnlineServiceList()
-{
-    service_list.resize(OS_Max);
-}
-
 void OnlineServiceList::registerService(const std::shared_ptr<OnlineService>& service)
 {
     if (service == nullptr)
@@ -72,9 +67,6 @@ OnlineService::OnlineService(std::shared_ptr<ContentManager> content)
     , database(content->getContext()->getDatabase())
     , content(std::move(content))
 {
-    taskCount = 0;
-    refresh_interval = 0;
-    purge_interval = 0;
 }
 
 char OnlineService::getDatabasePrefix(service_type_t service)

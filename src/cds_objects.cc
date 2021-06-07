@@ -39,18 +39,6 @@
 static constexpr bool IS_CDS_ITEM(unsigned int type) { return type & OBJECT_TYPE_ITEM; }
 static constexpr bool IS_CDS_PURE_ITEM(unsigned int type) { return type == OBJECT_TYPE_ITEM; }
 
-CdsObject::CdsObject()
-    : mtime(0)
-    , sizeOnDisk(0)
-{
-    id = INVALID_OBJECT_ID;
-    parentID = INVALID_OBJECT_ID;
-    refID = INVALID_OBJECT_ID;
-    virt = false;
-    sortPriority = 0;
-    objectFlags = OBJECT_FLAG_RESTRICTED;
-}
-
 void CdsObject::copyTo(const std::shared_ptr<CdsObject>& obj)
 {
     obj->setID(id);
@@ -66,7 +54,7 @@ void CdsObject::copyTo(const std::shared_ptr<CdsObject>& obj)
     obj->setAuxData(auxdata);
     obj->setFlags(objectFlags);
     obj->setSortPriority(sortPriority);
-    for (auto& resource : resources)
+    for (auto&& resource : resources)
         obj->addResource(resource->clone());
 }
 bool CdsObject::equals(const std::shared_ptr<CdsObject>& obj, bool exactly)
@@ -101,7 +89,7 @@ bool CdsObject::resourcesEqual(const std::shared_ptr<CdsObject>& obj)
 
     // compare all resources
     return std::equal(resources.begin(), resources.end(), obj->resources.begin(),
-        [](const auto& r1, const auto& r2) { return r1->equals(r2); });
+        [](auto&& r1, auto&& r2) { return r1->equals(r2); });
 }
 
 void CdsObject::validate()
@@ -115,27 +103,24 @@ void CdsObject::validate()
 
 std::shared_ptr<CdsObject> CdsObject::createObject(unsigned int objectType)
 {
-    std::shared_ptr<CdsObject> obj;
-
     if (IS_CDS_CONTAINER(objectType)) {
-        obj = std::make_shared<CdsContainer>();
-    } else if (IS_CDS_ITEM_EXTERNAL_URL(objectType)) {
-        obj = std::make_shared<CdsItemExternalURL>();
-    } else if (IS_CDS_ITEM(objectType)) {
-        obj = std::make_shared<CdsItem>();
-    } else {
-        throw_std_runtime_error("invalid object type: {}", objectType);
+        return std::make_shared<CdsContainer>();
     }
-    return obj;
+
+    if (IS_CDS_ITEM_EXTERNAL_URL(objectType)) {
+        return std::make_shared<CdsItemExternalURL>();
+    }
+
+    if (IS_CDS_ITEM(objectType)) {
+        return std::make_shared<CdsItem>();
+    }
+
+    throw_std_runtime_error("invalid object type: {}", objectType);
 }
 
 /* CdsItem */
 
 CdsItem::CdsItem()
-    : CdsObject()
-    , mimeType(MIMETYPE_DEFAULT)
-    , partNumber(0)
-    , trackNumber(0)
 {
     objectType = OBJECT_TYPE_ITEM;
     upnpClass = "object.item";
@@ -152,13 +137,14 @@ void CdsItem::copyTo(const std::shared_ptr<CdsObject>& obj)
     item->setTrackNumber(trackNumber);
     item->setPartNumber(partNumber);
     item->setServiceID(serviceID);
+    item->setBookMarkPos(bookMarkPos);
 }
 bool CdsItem::equals(const std::shared_ptr<CdsObject>& obj, bool exactly)
 {
     auto item = std::static_pointer_cast<CdsItem>(obj);
     if (!CdsObject::equals(obj, exactly))
         return false;
-    return (mimeType == item->getMimeType() && partNumber == item->getPartNumber() && trackNumber == item->getTrackNumber() && serviceID == item->getServiceID());
+    return (mimeType == item->getMimeType() && partNumber == item->getPartNumber() && trackNumber == item->getTrackNumber() && serviceID == item->getServiceID() && bookMarkPos == item->getBookMarkPos());
 }
 
 void CdsItem::validate()
@@ -187,7 +173,6 @@ CdsItemExternalURL::CdsItemExternalURL()
     objectType |= OBJECT_TYPE_ITEM_EXTERNAL_URL;
 
     upnpClass = UPNP_CLASS_ITEM;
-    mimeType = MIMETYPE_DEFAULT;
 }
 
 void CdsItemExternalURL::validate()
@@ -202,14 +187,9 @@ void CdsItemExternalURL::validate()
 //---------
 
 CdsContainer::CdsContainer()
-    : CdsObject()
 {
     objectType = OBJECT_TYPE_CONTAINER;
-    updateID = 0;
-    // searchable = 0; is now in objectFlags; by default all flags (except "restricted") are not set
-    childCount = -1;
     upnpClass = UPNP_CLASS_CONTAINER;
-    autoscanType = OBJECT_AUTOSCAN_NONE;
 }
 
 void CdsContainer::copyTo(const std::shared_ptr<CdsObject>& obj)
@@ -234,7 +214,7 @@ void CdsContainer::validate()
         throw_std_runtime_error("validation failed"); */
 }
 
-std::string CdsObject::mapObjectType(unsigned int type)
+std::string_view CdsObject::mapObjectType(unsigned int type)
 {
     if (IS_CDS_CONTAINER(type))
         return STRING_OBJECT_TYPE_CONTAINER;

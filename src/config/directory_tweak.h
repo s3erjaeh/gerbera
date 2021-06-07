@@ -52,13 +52,11 @@ public:
 
 class DirectoryConfigList {
 public:
-    explicit DirectoryConfigList() = default;
-
     /// \brief Adds a new DirectoryTweak to the list.
     ///
     /// \param dir DirectoryTweak to add to the list.
     /// \return scanID of the newly added DirectoryTweak
-    void add(const std::shared_ptr<DirectoryTweak>& dir, size_t index = SIZE_MAX);
+    void add(const std::shared_ptr<DirectoryTweak>& dir, size_t index = std::numeric_limits<std::size_t>::max());
 
     std::shared_ptr<DirectoryTweak> get(size_t id, bool edit = false);
 
@@ -75,7 +73,7 @@ public:
     std::vector<std::shared_ptr<DirectoryTweak>> getArrayCopy();
 
 protected:
-    size_t origSize;
+    size_t origSize {};
     std::map<size_t, std::shared_ptr<DirectoryTweak>> indexMap;
 
     std::recursive_mutex mutex;
@@ -88,12 +86,7 @@ protected:
 /// \brief Provides information about one directory.
 class DirectoryTweak {
 public:
-    explicit DirectoryTweak()
-        : location("")
-
-    {
-    }
-
+    explicit DirectoryTweak() = default;
     explicit DirectoryTweak(fs::path location, bool inherit)
         : location(std::move(location))
         , inherit(inherit)

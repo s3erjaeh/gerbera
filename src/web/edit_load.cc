@@ -32,6 +32,7 @@
 #include "pages.h" // API
 
 #include <cstdio>
+#include <fmt/chrono.h>
 
 #include "cds_objects.h"
 #include "database/database.h"
@@ -72,13 +73,23 @@ void web::edit_load::process()
     classEl.append_attribute("value") = obj->getClass().c_str();
     classEl.append_attribute("editable") = true;
 
-    item.append_child("obj_type").append_child(pugi::node_pcdata).set_value(CdsObject::mapObjectType(obj->getObjectType()).c_str());
+    if (obj->getMTime() > std::chrono::seconds::zero()) {
+        auto lmtEl = item.append_child("last_modified");
+        lmtEl.append_attribute("value") = fmt::format("{:%Y-%m-%d %H:%M:%S}", fmt::localtime(obj->getMTime().count())).c_str();
+        lmtEl.append_attribute("editable") = false;
+    } else {
+        auto lmtEl = item.append_child("last_modified");
+        lmtEl.append_attribute("value") = "";
+        lmtEl.append_attribute("editable") = false;
+    }
+
+    item.append_child("obj_type").append_child(pugi::node_pcdata).set_value(CdsObject::mapObjectType(obj->getObjectType()).data());
 
     auto metaData = item.append_child("metadata");
     xml2JsonHints->setArrayName(metaData, "metadata");
     xml2JsonHints->setFieldType("metavalue", "string");
 
-    for (const auto& [key, val] : obj->getMetadata()) {
+    for (auto&& [key, val] : obj->getMetadata()) {
         auto metaEntry = metaData.append_child("metadata");
         metaEntry.append_attribute("metaname") = key.c_str();
         metaEntry.append_attribute("metavalue") = val.c_str();
@@ -89,7 +100,7 @@ void web::edit_load::process()
     xml2JsonHints->setArrayName(auxData, "auxdata");
     xml2JsonHints->setFieldType("auxvalue", "string");
 
-    for (const auto& [key, val] : obj->getAuxData()) {
+    for (auto&& [key, val] : obj->getAuxData()) {
         auto auxEntry = auxData.append_child("auxdata");
         auxEntry.append_attribute("auxname") = key.c_str();
         auxEntry.append_attribute("auxvalue") = val.c_str();
@@ -101,7 +112,7 @@ void web::edit_load::process()
     xml2JsonHints->setFieldType("resvalue", "string");
 
     int resIndex = 0;
-    for (const auto& resItem : obj->getResources()) {
+    for (auto&& resItem : obj->getResources()) {
         auto resEntry = resources.append_child("resources");
         resEntry.append_attribute("resname") = "----RESOURCE----";
         resEntry.append_attribute("resvalue") = fmt::format("{}", resIndex).c_str();
@@ -112,19 +123,19 @@ void web::edit_load::process()
         resEntry.append_attribute("resvalue") = fmt::format("{}", MetadataHandler::mapContentHandler2String(resItem->getHandlerType())).c_str();
         resEntry.append_attribute("editable") = false;
 
-        for (const auto& [key, val] : resItem->getParameters()) {
+        for (auto&& [key, val] : resItem->getParameters()) {
             auto resEntry = resources.append_child("resources");
             resEntry.append_attribute("resname") = fmt::format(".{}", key.c_str()).c_str();
             resEntry.append_attribute("resvalue") = val.c_str();
             resEntry.append_attribute("editable") = false;
         }
-        for (const auto& [key, val] : resItem->getAttributes()) {
+        for (auto&& [key, val] : resItem->getAttributes()) {
             auto resEntry = resources.append_child("resources");
             resEntry.append_attribute("resname") = fmt::format(" {}", key.c_str()).c_str();
             resEntry.append_attribute("resvalue") = val.c_str();
             resEntry.append_attribute("editable") = false;
         }
-        for (const auto& [key, val] : resItem->getOptions()) {
+        for (auto&& [key, val] : resItem->getOptions()) {
             auto resEntry = resources.append_child("resources");
             resEntry.append_attribute("resname") = fmt::format("-{}", key.c_str()).c_str();
             resEntry.append_attribute("resvalue") = val.c_str();
@@ -142,10 +153,7 @@ void web::edit_load::process()
 
         auto location = item.append_child("location");
         location.append_attribute("value") = objItem->getLocation().c_str();
-        if (obj->isPureItem() || !obj->isVirtual())
-            location.append_attribute("editable") = false;
-        else
-            location.append_attribute("editable") = true;
+        location.append_attribute("editable") = !(obj->isPureItem() || !obj->isVirtual());
 
         auto mimeType = item.append_child("mime-type");
         mimeType.append_attribute("value") = objItem->getMimeType().c_str();

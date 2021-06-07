@@ -33,10 +33,6 @@
 #include "autoscan_inotify.h" // API
 
 #include <cassert>
-#include <filesystem>
-
-#include <dirent.h>
-#include <sys/stat.h>
 
 #include "content_manager.h"
 #include "database/database.h"
@@ -91,6 +87,7 @@ void AutoscanInotify::run()
 
 void AutoscanInotify::threadProc()
 {
+    std::error_code ec;
     while (!shutdownFlag) {
         try {
             std::unique_lock<std::mutex> lock(mutex);
@@ -106,12 +103,13 @@ void AutoscanInotify::threadProc()
                     lock.lock();
                     continue;
                 }
+                auto dirEnt = fs::directory_entry(location, ec);
 
                 if (adir->getRecursive()) {
-                    log_debug("removing recursive watch: {}", location.c_str());
-                    monitorUnmonitorRecursive(location, true, adir, true);
+                    log_debug("Removing recursive watch: {}", location.c_str());
+                    monitorUnmonitorRecursive(dirEnt, true, adir, true, config->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS));
                 } else {
-                    log_debug("removing non-recursive watch: {}", location.c_str());
+                    log_debug("Removing non-recursive watch: {}", location.c_str());
                     unmonitorDirectory(location, adir);
                 }
 
@@ -130,14 +128,19 @@ void AutoscanInotify::threadProc()
                     continue;
                 }
 
-                if (adir->getRecursive()) {
-                    log_debug("adding recursive watch: {}", location.c_str());
-                    monitorUnmonitorRecursive(location, false, adir, true);
+                auto dirEnt = fs::directory_entry(location, ec);
+                if (!ec) {
+                    if (adir->getRecursive()) {
+                        log_debug("Adding recursive watch: {}", location.c_str());
+                        monitorUnmonitorRecursive(dirEnt, false, adir, true, config->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS));
+                    } else {
+                        log_debug("Adding non-recursive watch: {}", location.c_str());
+                        monitorDirectory(location, adir, true);
+                    }
+                    content->rescanDirectory(adir, adir->getObjectID(), location, false);
                 } else {
-                    log_debug("adding non-recursive watch: {}", location.c_str());
-                    monitorDirectory(location, adir, true);
+                    log_error("Failed to read {}: {}", location.c_str(), ec.message());
                 }
-                content->rescanDirectory(adir, adir->getObjectID(), location, false);
 
                 lock.lock();
             }
@@ -189,10 +192,15 @@ void AutoscanInotify::threadProc()
                     if (adir != nullptr && adir->getRecursive()) {
                         if (mask & IN_CREATE) {
                             if (adir->getHidden() || name.at(0) != '.') {
-                                log_debug("new dir detected, adding to inotify: {}", path.c_str());
-                                monitorUnmonitorRecursive(path, false, adir, false);
+                                log_debug("Detected new dir, adding to inotify: {}", path.c_str());
+                                auto dirEnt = fs::directory_entry(path, ec);
+                                if (!ec) {
+                                    monitorUnmonitorRecursive(dirEnt, false, adir, false, config->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS));
+                                } else {
+                                    log_error("Failed to read {}: {}", path.c_str(), ec.message());
+                                }
                             } else {
-                                log_debug("new dir detected, irgnoring because it's hidden: {}", path.c_str());
+                                log_debug("Detected new dir, irgnoring because it's hidden: {}", path.c_str());
                             }
                         }
                     }
@@ -219,19 +227,24 @@ void AutoscanInotify::threadProc()
                             content->removeObject(adir, objectID, !(mask & IN_MOVED_TO));
                     }
                     if (mask & (IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE)) {
-                        log_debug("adding {}", path.c_str());
-                        // path, recursive, async, hidden, rescanResource, low priority, cancellable
-                        AutoScanSetting asSetting;
-                        asSetting.adir = adir;
-                        asSetting.followSymlinks = config->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS);
-                        asSetting.recursive = adir->getRecursive();
-                        asSetting.hidden = adir->getHidden();
-                        asSetting.rescanResource = true;
-                        asSetting.mergeOptions(config, path);
-                        content->addFile(path, adir->getLocation(), asSetting, true, true, false);
-
-                        if (mask & IN_ISDIR)
-                            monitorUnmonitorRecursive(path, false, adir, false);
+                        log_debug("Adding {}", path.c_str());
+                        auto dirEnt = fs::directory_entry(path, ec);
+                        if (!ec) {
+                            AutoScanSetting asSetting;
+                            asSetting.adir = adir;
+                            asSetting.followSymlinks = config->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS);
+                            asSetting.recursive = adir->getRecursive();
+                            asSetting.hidden = adir->getHidden();
+                            asSetting.rescanResource = true;
+                            asSetting.mergeOptions(config, path);
+                            // path, recursive, async, hidden, rescanResource, low priority, cancellable
+                            content->addFile(dirEnt, adir->getLocation(), asSetting, true, true, false);
+                            if (mask & IN_ISDIR) {
+                                monitorUnmonitorRecursive(dirEnt, false, adir, false, asSetting.followSymlinks);
+                            }
+                        } else {
+                            log_error("Failed to read {}: {}", path.c_str(), ec.message());
+                        }
                     }
                 }
                 if (mask & IN_IGNORED) {
@@ -272,7 +285,7 @@ int AutoscanInotify::watchPathForMoves(const fs::path& path, int wd)
 
     fs::path watchPath;
     for (auto it = path.begin(); it != std::prev(path.end()); ++it) {
-        const auto& p = *it;
+        auto&& p = *it;
         watchPath /= p;
         log_debug("adding move watch: {}", watchPath.c_str());
         parentWd = addMoveWatch(watchPath, wd, parentWd);
@@ -361,8 +374,8 @@ void AutoscanInotify::checkMoveWatches(int wd, const std::shared_ptr<Wd>& wdObj)
 {
     auto wdWatches = wdObj->getWdWatches();
     for (auto it = wdWatches->begin(); it != wdWatches->end(); /*++it*/) {
-        auto& watch = *it;
-        if (watch->getType() == WatchType::Move) {
+        auto& watchToCheck = *it;
+        if (watchToCheck->getType() == WatchType::Move) {
             if (wdWatches->size() == 1) {
                 inotify->removeWatch(wd);
                 ++it;
@@ -370,7 +383,7 @@ void AutoscanInotify::checkMoveWatches(int wd, const std::shared_ptr<Wd>& wdObj)
                 it = wdWatches->erase(it);
             }
 
-            auto watchMv = std::static_pointer_cast<WatchMove>(watch);
+            auto watchMv = std::static_pointer_cast<WatchMove>(watchToCheck);
             int removeWd = watchMv->getRemoveWd();
             try {
                 auto wdToRemove = watches->at(removeWd);
@@ -381,9 +394,9 @@ void AutoscanInotify::checkMoveWatches(int wd, const std::shared_ptr<Wd>& wdObj)
                 log_debug("found wd to remove because of move event: {} {}", removeWd, path.c_str());
 
                 inotify->removeWatch(removeWd);
-                auto watch = getStartPoint(wdToRemove);
-                if (watch != nullptr) {
-                    std::shared_ptr<AutoscanDirectory> adir = watch->getAutoscanDirectory();
+                auto watchToRemove = getStartPoint(wdToRemove);
+                if (watchToRemove != nullptr) {
+                    std::shared_ptr<AutoscanDirectory> adir = watchToRemove->getAutoscanDirectory();
                     if (adir->persistent()) {
                         monitorNonexisting(path, adir);
                         content->handlePeristentAutoscanRemove(adir);
@@ -403,7 +416,7 @@ void AutoscanInotify::checkMoveWatches(int wd, const std::shared_ptr<Wd>& wdObj)
 void AutoscanInotify::recheckNonexistingMonitors(int wd, const std::shared_ptr<Wd>& wdObj)
 {
     auto wdWatches = wdObj->getWdWatches();
-    for (const auto& watch : *wdWatches) {
+    for (auto&& watch : *wdWatches) {
         if (watch->getType() == WatchType::Autoscan) {
             auto watchAs = std::static_pointer_cast<WatchAutoscan>(watch);
             auto pathAr = watchAs->getNonexistingPathArray();
@@ -438,38 +451,43 @@ void AutoscanInotify::removeNonexistingMonitor(int wd, const std::shared_ptr<Wd>
     }
 }
 
-void AutoscanInotify::monitorUnmonitorRecursive(const fs::path& startPath, bool unmonitor, const std::shared_ptr<AutoscanDirectory>& adir, bool startPoint)
+void AutoscanInotify::monitorUnmonitorRecursive(const fs::directory_entry& startPath, bool unmonitor, const std::shared_ptr<AutoscanDirectory>& adir, bool startPoint, bool followSymlinks)
 {
     if (unmonitor)
-        unmonitorDirectory(startPath, adir);
+        unmonitorDirectory(startPath.path(), adir);
     else {
-        bool ok = (monitorDirectory(startPath, adir, startPoint) > 0);
+        bool ok = (monitorDirectory(startPath.path(), adir, startPoint) > 0);
         if (!ok)
             return;
     }
 
-    DIR* dir = opendir(startPath.c_str());
-    if (!dir) {
-        log_warning("Could not open {}", startPath.c_str());
+    std::error_code ec;
+    if (!startPath.exists(ec) || !startPath.is_directory(ec)) {
+        log_warning("Could not open {}: {}", startPath.path().c_str(), ec.message());
         return;
     }
+    auto dIter = fs::directory_iterator(startPath, ec);
+    if (ec) {
+        log_error("monitorUnmonitorRecursive: Failed to iterate {}, {}", startPath.path().c_str(), ec.message());
+        return;
+    }
+    for (auto&& dirEnt : dIter) {
+        if (shutdownFlag)
+            break;
 
-    struct dirent* dent;
-    while ((dent = readdir(dir)) != nullptr && !shutdownFlag) {
-        char* name = dent->d_name;
-        if (name[0] == '.') {
-            if (name[1] == 0)
-                continue;
-            if (name[1] == '.' && name[2] == 0)
-                continue;
+        if (!followSymlinks && dirEnt.is_symlink(ec)) {
+            log_debug("link {} skipped", dirEnt.path().c_str());
+            continue;
         }
 
-        fs::path fullpath = startPath / name;
-        if (fs::is_directory(fullpath))
-            monitorUnmonitorRecursive(fullpath, unmonitor, adir, false);
-    }
+        if (dirEnt.is_directory(ec) && adir->getRecursive()) {
+            monitorUnmonitorRecursive(dirEnt, unmonitor, adir, false, followSymlinks);
+        }
 
-    closedir(dir);
+        if (ec) {
+            log_error("monitorUnmonitorRecursive: Failed to read {}, {}", dirEnt.path().c_str(), ec.message());
+        }
+    }
 }
 
 int AutoscanInotify::monitorDirectory(const fs::path& path, const std::shared_ptr<AutoscanDirectory>& adir, bool startPoint, const std::vector<std::string>* pathArray)
@@ -557,7 +575,7 @@ void AutoscanInotify::unmonitorDirectory(const fs::path& path, const std::shared
 std::shared_ptr<AutoscanInotify::WatchAutoscan> AutoscanInotify::getAppropriateAutoscan(const std::shared_ptr<Wd>& wdObj, const std::shared_ptr<AutoscanDirectory>& adir)
 {
     auto wdWatches = wdObj->getWdWatches();
-    for (const auto& watch : *wdWatches) {
+    for (auto&& watch : *wdWatches) {
         if (watch->getType() == WatchType::Autoscan) {
             auto watchAs = std::static_pointer_cast<WatchAutoscan>(watch);
             if (watchAs->getNonexistingPathArray().empty()) {
@@ -575,7 +593,7 @@ std::shared_ptr<AutoscanInotify::WatchAutoscan> AutoscanInotify::getAppropriateA
     fs::path pathBestMatch;
     std::shared_ptr<WatchAutoscan> bestMatch = nullptr;
     auto wdWatches = wdObj->getWdWatches();
-    for (const auto& watch : *wdWatches) {
+    for (auto&& watch : *wdWatches) {
         if (watch->getType() == WatchType::Autoscan) {
             auto watchAs = std::static_pointer_cast<WatchAutoscan>(watch);
             if (watchAs->getNonexistingPathArray().empty()) {
@@ -657,7 +675,7 @@ bool AutoscanInotify::removeFromWdObj(const std::shared_ptr<Wd>& wdObj, const st
 std::shared_ptr<AutoscanInotify::WatchAutoscan> AutoscanInotify::getStartPoint(const std::shared_ptr<Wd>& wdObj)
 {
     auto wdWatches = wdObj->getWdWatches();
-    for (const auto& watch : *wdWatches) {
+    for (auto&& watch : *wdWatches) {
         if (watch->getType() == WatchType::Autoscan) {
             auto watchAs = std::static_pointer_cast<WatchAutoscan>(watch);
             if (watchAs->isStartPoint())
@@ -698,7 +716,7 @@ void AutoscanInotify::removeDescendants(int wd)
     }
 
     auto wdWatches = wdObj->getWdWatches();
-    for (const auto& watch : *wdWatches) {
+    for (auto&& watch : *wdWatches) {
         if (watch->getType() == WatchType::Autoscan) {
             auto watchAs = std::static_pointer_cast<WatchAutoscan>(watch);
             for (int descWd : watchAs->getDescendants()) {

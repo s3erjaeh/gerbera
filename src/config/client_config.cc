@@ -62,7 +62,7 @@ void ClientConfigList::add(const std::shared_ptr<ClientConfig>& client, size_t i
 
 void ClientConfigList::_add(const std::shared_ptr<ClientConfig>& client, size_t index)
 {
-    if (index == SIZE_MAX) {
+    if (index == std::numeric_limits<std::size_t>::max()) {
         index = getEditSize();
         origSize = list.size() + 1;
         client->setOrig(true);
@@ -117,8 +117,8 @@ void ClientConfigList::remove(size_t id, bool edit)
             log_debug("No such index ID {}!", id);
             return;
         }
-        const auto& client = indexMap[id];
-        auto entry = std::find_if(list.begin(), list.end(), [=](const auto& item) { return client->getIp() == item->getIp() && client->getUserAgent() == item->getUserAgent(); });
+        auto&& client = indexMap[id];
+        auto entry = std::find_if(list.begin(), list.end(), [ip = client->getIp(), user = client->getUserAgent()](auto&& item) { return ip == item->getIp() && user == item->getUserAgent(); });
         list.erase(entry);
         if (id >= origSize) {
             indexMap.erase(id);
@@ -127,57 +127,40 @@ void ClientConfigList::remove(size_t id, bool edit)
     }
 }
 
-std::string ClientConfig::mapClientType(ClientType clientType)
+std::string_view ClientConfig::mapClientType(ClientType clientType)
 {
-    std::string clientType_str;
     switch (clientType) {
     case ClientType::Unknown:
-        clientType_str = "None";
-        break;
+        return "None";
     case ClientType::BubbleUPnP:
-        clientType_str = "BubbleUPnP";
-        break;
+        return "BubbleUPnP";
     case ClientType::SamsungAllShare:
-        clientType_str = "SamsungAllShare";
-        break;
+        return "SamsungAllShare";
     case ClientType::SamsungSeriesQ:
-        clientType_str = "SamsungSeriesQ";
-        break;
+        return "SamsungSeriesQ";
     case ClientType::SamsungBDP:
-        clientType_str = "SamsungBDP";
-        break;
+        return "SamsungBDP";
     case ClientType::SamsungSeriesCDE:
-        clientType_str = "SamsungSeriesCDE";
-        break;
+        return "SamsungSeriesCDE";
     case ClientType::SamsungBDJ5500:
-        clientType_str = "SamsungBDJ5500";
-        break;
+        return "SamsungBDJ5500";
     case ClientType::StandardUPnP:
-        clientType_str = "StandardUPnP";
-        break;
-    default:
-        throw_std_runtime_error("illegal clientType given to mapClientType()");
+        return "StandardUPnP";
     }
-    return clientType_str;
+    throw_std_runtime_error("illegal clientType given to mapClientType()");
 }
 
-std::string ClientConfig::mapMatchType(ClientMatchType matchType)
+std::string_view ClientConfig::mapMatchType(ClientMatchType matchType)
 {
-    std::string matchType_str;
     switch (matchType) {
     case ClientMatchType::None:
-        matchType_str = "None";
-        break;
+        return "None";
     case ClientMatchType::UserAgent:
-        matchType_str = "UserAgent";
-        break;
+        return "UserAgent";
     case ClientMatchType::IP:
-        matchType_str = "IP";
-        break;
-    default:
-        throw_std_runtime_error("illegal matchType given to mapMatchType()");
+        return "IP";
     }
-    return matchType_str;
+    throw_std_runtime_error("illegal matchType given to mapMatchType()");
 }
 
 ClientType ClientConfig::remapClientType(const std::string& clientType)
@@ -215,6 +198,13 @@ int ClientConfig::remapFlag(const std::string& flag)
     if (flag == "SAMSUNG") {
         return QUIRK_FLAG_SAMSUNG;
     }
+    if (flag == "SAMSUNG_BOOKMARK_SEC") {
+        return QUIRK_FLAG_SAMSUNG_BOOKMARK_SEC;
+    }
+    if (flag == "SAMSUNG_BOOKMARK_MSEC") {
+        return QUIRK_FLAG_SAMSUNG_BOOKMARK_MSEC;
+    }
+
     return stoiString(flag, 0, 0);
 }
 
@@ -228,6 +218,14 @@ std::string ClientConfig::mapFlags(QuirkFlags flags)
     if (flags & QUIRK_FLAG_SAMSUNG) {
         myFlags.emplace_back("SAMSUNG");
         flags &= ~QUIRK_FLAG_SAMSUNG;
+    }
+    if (flags & QUIRK_FLAG_SAMSUNG_BOOKMARK_SEC) {
+        myFlags.emplace_back("SAMSUNG_BOOKMARK_SEC");
+        flags &= ~QUIRK_FLAG_SAMSUNG_BOOKMARK_SEC;
+    }
+    if (flags & QUIRK_FLAG_SAMSUNG_BOOKMARK_MSEC) {
+        myFlags.emplace_back("SAMSUNG_BOOKMARK_MSEC");
+        flags &= ~QUIRK_FLAG_SAMSUNG_BOOKMARK_MSEC;
     }
 
     if (flags) {

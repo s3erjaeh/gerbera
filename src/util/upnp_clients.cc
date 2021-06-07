@@ -33,7 +33,7 @@
 
 #include <upnp.h>
 
-// table of supported clients (sequence of entries matters!)
+// table of supported clients (reverse search, sequence of entries matters!)
 static const auto bultinClientInfo = std::array<ClientInfo, 8> {
     {
 
@@ -46,6 +46,18 @@ static const auto bultinClientInfo = std::array<ClientInfo, 8> {
             "",
         },
 
+        // Gerbera, FRITZ!Box, Windows 10, etc...
+        // User-Agent(actionReq): Linux/5.4.0-4-amd64, UPnP/1.0, Portable SDK for UPnP devices/1.8.6
+        // User-Agent(actionReq): FRITZ!Box 5490 UPnP/1.0 AVM FRITZ!Box 5490 151.07.12
+        // User-Agent(actionReq): Microsoft-Windows/10.0 UPnP/1.0 Microsoft-DLNA DLNADOC/1.50
+        {
+            "Standard UPnP",
+            ClientType::StandardUPnP,
+            QUIRK_FLAG_NONE,
+            ClientMatchType::UserAgent,
+            "UPnP/1.0",
+        },
+
         // User-Agent(discovery): Linux/3.18.91-14843133-QB28034466 UPnP/1.0 BubbleUPnP/3.4.4
         // User-Agent(fileInfo ): BubbleUPnP UPnP/1.1
         // User-Agent(actionReq): Android/8.0.0 UPnP/1.0 BubbleUPnP/3.4.4
@@ -55,6 +67,17 @@ static const auto bultinClientInfo = std::array<ClientInfo, 8> {
             QUIRK_FLAG_NONE,
             ClientMatchType::UserAgent,
             "BubbleUPnP",
+        },
+
+        // User-Agent(actionReq): DLNADOC/1.50 SEC_HHP_[TV]UE40D7000/1.0
+        // User-Agent(actionReq): DLNADOC/1.50 SEC_HHP_ Family TV/1.0
+        // User-Agent(actionReq): DLNADOC/1.50 SEC_HHP_[TV] UE65JU7000/1.0 UPnP/1.0
+        {
+            "Samsung other TVs",
+            ClientType::SamsungSeriesCDE,
+            QUIRK_FLAG_SAMSUNG,
+            ClientMatchType::UserAgent,
+            "SEC_HHP_",
         },
 
         // This is AllShare running on a PC. We don't want to respond with Samsung capabilities, or Windows (and AllShare) might get grumpy.
@@ -85,17 +108,6 @@ static const auto bultinClientInfo = std::array<ClientInfo, 8> {
             "SEC_HHP_BD",
         },
 
-        // User-Agent(actionReq): DLNADOC/1.50 SEC_HHP_[TV]UE40D7000/1.0
-        // User-Agent(actionReq): DLNADOC/1.50 SEC_HHP_ Family TV/1.0
-        // User-Agent(actionReq): DLNADOC/1.50 SEC_HHP_[TV] UE65JU7000/1.0 UPnP/1.0
-        {
-            "Samsung other TVs",
-            ClientType::SamsungSeriesCDE,
-            QUIRK_FLAG_SAMSUNG,
-            ClientMatchType::UserAgent,
-            "SEC_HHP_",
-        },
-
         // User-Agent: ?
         {
             "Samsung Blu-ray Player J5500",
@@ -103,18 +115,6 @@ static const auto bultinClientInfo = std::array<ClientInfo, 8> {
             QUIRK_FLAG_SAMSUNG,
             ClientMatchType::UserAgent,
             "[BD]J5500",
-        },
-
-        // Gerbera, FRITZ!Box, Windows 10, etc...
-        // User-Agent(actionReq): Linux/5.4.0-4-amd64, UPnP/1.0, Portable SDK for UPnP devices/1.8.6
-        // User-Agent(actionReq): FRITZ!Box 5490 UPnP/1.0 AVM FRITZ!Box 5490 151.07.12
-        // User-Agent(actionReq): Microsoft-Windows/10.0 UPnP/1.0 Microsoft-DLNA DLNADOC/1.50
-        {
-            "Standard UPnP",
-            ClientType::StandardUPnP,
-            QUIRK_FLAG_NONE,
-            ClientMatchType::UserAgent,
-            "UPnP/1.0",
         },
     }
 };
@@ -131,8 +131,6 @@ Clients::Clients(const std::shared_ptr<Config>& config)
 
     cache = std::make_shared<std::vector<ClientCacheEntry>>();
 }
-
-Clients::~Clients() = default;
 
 void Clients::addClientByDiscovery(const struct sockaddr_storage* addr, const std::string& userAgent, const std::string& descLocation)
 {
@@ -185,7 +183,7 @@ void Clients::getInfo(const struct sockaddr_storage* addr, const std::string& us
 
 bool Clients::getInfoByAddr(const struct sockaddr_storage* addr, const ClientInfo** ppInfo)
 {
-    auto it = std::find_if(clientInfo.begin(), clientInfo.end(), [=](const auto& c) {
+    auto it = std::find_if(clientInfo.begin(), clientInfo.end(), [&](auto&& c) {
         if (c.matchType != ClientMatchType::IP) {
             return false;
         }
@@ -226,10 +224,8 @@ bool Clients::getInfoByAddr(const struct sockaddr_storage* addr, const ClientInf
 bool Clients::getInfoByType(const std::string& match, ClientMatchType type, const ClientInfo** ppInfo)
 {
     if (!match.empty()) {
-        auto it = std::find_if(clientInfo.begin(), clientInfo.end(), [=](const auto& c) //
-            { return c.matchType == type && match.find(c.match) != std::string::npos; });
-
-        if (it != clientInfo.end()) {
+        auto it = std::find_if(clientInfo.rbegin(), clientInfo.rend(), [&](auto&& c) { return c.matchType == type && match.find(c.match) != std::string::npos; });
+        if (it != clientInfo.rend()) {
             *ppInfo = &(*it);
             log_debug("found client by type (match='{}')", match.c_str());
             return true;
@@ -244,7 +240,7 @@ bool Clients::getInfoByCache(const struct sockaddr_storage* addr, const ClientIn
 {
     AutoLock lock(mutex);
 
-    auto it = std::find_if(cache->begin(), cache->end(), [=](const auto& entry) //
+    auto it = std::find_if(cache->begin(), cache->end(), [&](auto&& entry) //
         { return sockAddrCmpAddr(reinterpret_cast<const struct sockaddr*>(&entry.addr), reinterpret_cast<const struct sockaddr*>(addr)) == 0; });
 
     if (it != cache->end()) {
@@ -263,12 +259,12 @@ void Clients::updateCache(const struct sockaddr_storage* addr, const std::string
     AutoLock lock(mutex);
 
     // house cleaning, remove old entries
-    auto now = std::chrono::steady_clock::now();
+    auto now = currentTime();
     cache->erase(std::remove_if(cache->begin(), cache->end(),
-                     [now](const auto& entry) { return entry.last + std::chrono::hours(6) < now; }),
+                     [now](auto&& entry) { return entry.last + std::chrono::hours(6) < now; }),
         cache->end());
 
-    auto it = std::find_if(cache->begin(), cache->end(), [=](const auto& entry) //
+    auto it = std::find_if(cache->begin(), cache->end(), [=](auto&& entry) //
         { return sockAddrCmpAddr(reinterpret_cast<const struct sockaddr*>(&entry.addr), reinterpret_cast<const struct sockaddr*>(addr)) == 0; });
 
     if (it != cache->end()) {
@@ -290,7 +286,7 @@ void Clients::updateCache(const struct sockaddr_storage* addr, const std::string
     }
 }
 
-bool Clients::downloadDescription(const std::string& location, std::unique_ptr<pugi::xml_document>& xml)
+bool Clients::downloadDescription(const std::string& location, std::unique_ptr<pugi::xml_document> xml)
 {
 #if defined(USING_NPUPNP)
     std::string description, ct;

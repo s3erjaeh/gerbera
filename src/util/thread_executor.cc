@@ -38,12 +38,17 @@ ThreadExecutor::~ThreadExecutor()
 
 void ThreadExecutor::startThread()
 {
-    threadRunning = true;
-    pthread_create(
+    int ret = pthread_create(
         &thread,
-        nullptr, // attr
+        nullptr,
         ThreadExecutor::staticThreadProc,
         this);
+
+    if (ret != 0) {
+        log_error("Could not start thread: {}", std::strerror(ret));
+    } else {
+        threadRunning = true;
+    }
 }
 
 bool ThreadExecutor::kill()
@@ -59,6 +64,7 @@ bool ThreadExecutor::kill()
     if (thread) {
         threadRunning = false;
         pthread_join(thread, nullptr);
+        thread = 0;
     }
     return true;
 }

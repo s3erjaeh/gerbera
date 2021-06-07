@@ -34,7 +34,6 @@
 
 #include <duktape.h>
 #include <mutex>
-#include <pthread.h>
 
 #include "common.h"
 
@@ -47,6 +46,9 @@ protected:
 public:
     ScriptingRuntime();
     virtual ~ScriptingRuntime();
+
+    ScriptingRuntime(const ScriptingRuntime&) = delete;
+    ScriptingRuntime& operator=(const ScriptingRuntime&) = delete;
 
     /// \brief Returns a new (sub)context. !!! Not thread-safe !!!
     duk_context* createContext(const std::string& name);

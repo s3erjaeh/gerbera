@@ -65,13 +65,12 @@ MetadataHandler::MetadataHandler(const std::shared_ptr<Context>& context)
 {
 }
 
-void MetadataHandler::setMetadata(const std::shared_ptr<Context>& context, const std::shared_ptr<CdsItem>& item)
+void MetadataHandler::setMetadata(const std::shared_ptr<Context>& context, const std::shared_ptr<CdsItem>& item, const fs::directory_entry& dirEnt)
 {
-    std::string location = item->getLocation();
     std::error_code ec;
-    if (!isRegularFile(location, ec))
-        throw_std_runtime_error("Not a file: {}", location.c_str());
-    auto filesize = getFileSize(location);
+    if (!isRegularFile(dirEnt, ec))
+        throw_std_runtime_error("Not a file: {}", dirEnt.path().c_str());
+    auto filesize = getFileSize(dirEnt);
 
     std::string mimetype = item->getMimeType();
 
@@ -118,7 +117,7 @@ void MetadataHandler::setMetadata(const std::shared_ptr<Context>& context, const
     }
 #else
     if (content_type == CONTENT_TYPE_AVI) {
-        std::string fourcc = getAVIFourCC(item->getLocation());
+        std::string fourcc = getAVIFourCC(dirEnt.path().string());
         if (!fourcc.empty()) {
             item->getResource(0)->addOption(RESOURCE_OPTION_FOURCC,
                 fourcc);
@@ -139,7 +138,7 @@ void MetadataHandler::setMetadata(const std::shared_ptr<Context>& context, const
 
 std::string MetadataHandler::getMetaFieldName(metadata_fields_t field)
 {
-    for (const auto& [f, s] : mt_keys) {
+    for (auto&& [f, s] : mt_keys) {
         if (f == field) {
             return s;
         }
@@ -149,7 +148,7 @@ std::string MetadataHandler::getMetaFieldName(metadata_fields_t field)
 
 std::string MetadataHandler::getResAttrName(resource_attributes_t attr)
 {
-    for (const auto& [f, s] : res_keys) {
+    for (auto&& [f, s] : res_keys) {
         if (f == attr) {
             return s;
         }
@@ -184,9 +183,8 @@ std::unique_ptr<MetadataHandler> MetadataHandler::createHandler(const std::share
         return std::make_unique<SubtitleHandler>(context);
     case CH_RESOURCE:
         return std::make_unique<ResourceHandler>(context);
-    default:
-        throw_std_runtime_error("Unknown content handler ID: {}", handlerType);
     }
+    throw_std_runtime_error("Unknown content handler ID: {}", handlerType);
 }
 
 std::string MetadataHandler::getMimeType()
@@ -231,7 +229,6 @@ const char* MetadataHandler::mapContentHandler2String(int ch)
         return "Subtitle";
     case CH_RESOURCE:
         return "Resource";
-    default:
-        return "Unknown";
     }
+    return "Unknown";
 }

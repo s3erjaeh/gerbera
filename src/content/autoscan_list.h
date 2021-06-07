@@ -35,6 +35,7 @@ class AutoscanDirectory;
 class AutoscanList {
 public:
     explicit AutoscanList(std::shared_ptr<Database> database);
+    virtual ~AutoscanList() = default;
 
     /// \brief Adds a new AutoscanDirectory to the list.
     ///
@@ -43,7 +44,7 @@ public:
     ///
     /// \param dir AutoscanDirectory to add to the list.
     /// \return scanID of the newly added AutoscanDirectory
-    int add(const std::shared_ptr<AutoscanDirectory>& dir, size_t index = SIZE_MAX);
+    int add(const std::shared_ptr<AutoscanDirectory>& dir, size_t index = std::numeric_limits<std::size_t>::max());
 
     [[maybe_unused]] void addList(const std::shared_ptr<AutoscanList>& list);
 

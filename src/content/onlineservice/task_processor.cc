@@ -37,36 +37,38 @@
 
 void TaskProcessor::run()
 {
-    int ret;
-    ret = pthread_create(&taskThread, nullptr, TaskProcessor::staticThreadProc,
-        this);
+    threadRunner = std::make_unique<StdThreadRunner>("TaskProcessorThread", TaskProcessor::staticThreadProc, this, config);
 
-    if (ret != 0) {
-        throw_std_runtime_error("Could not launch task processor thread");
-    }
+    // wait for thread to become ready
+    threadRunner->waitForReady();
+
+    if (!threadRunner->isAlive())
+        throw_std_runtime_error("Failed to task processor thread");
 }
 
 void TaskProcessor::shutdown()
 {
     log_debug("Shutting down TaskProcessor");
     shutdownFlag = true;
-    cond.notify_one();
-    if (taskThread)
-        pthread_join(taskThread, nullptr);
-    taskThread = 0;
+    threadRunner->notify();
+    threadRunner->join();
 }
 
 void* TaskProcessor::staticThreadProc(void* arg)
 {
     auto inst = static_cast<TaskProcessor*>(arg);
     inst->threadProc();
-    pthread_exit(nullptr);
+    return nullptr;
 }
 
 void TaskProcessor::threadProc()
 {
+    StdThreadRunner::waitFor("TaskProcessor", [this] { return threadRunner != nullptr; });
+
     std::shared_ptr<GenericTask> task;
-    AutoLockU lock(mutex);
+    auto lock = threadRunner->uniqueLockS("threadProc");
+    // tell run() that we are ready
+    threadRunner->setReady();
     working = true;
 
     while (!shutdownFlag) {
@@ -80,7 +82,7 @@ void TaskProcessor::threadProc()
 
         if (task == nullptr) {
             working = false;
-            cond.wait(lock);
+            threadRunner->wait(lock);
             working = true;
             continue;
         }
@@ -105,35 +107,35 @@ void TaskProcessor::threadProc()
 
 void TaskProcessor::addTask(const std::shared_ptr<GenericTask>& task)
 {
-    AutoLock lock(mutex);
+    auto lock = threadRunner->lockGuard();
 
     task->setID(taskID++);
 
     taskQueue.push_back(task);
-    cond.notify_one();
+    threadRunner->notify();
 }
 
 std::shared_ptr<GenericTask> TaskProcessor::getCurrentTask()
 {
     std::shared_ptr<GenericTask> task;
-    AutoLock lock(mutex);
+    auto lock = threadRunner->lockGuard();
     task = currentTask;
     return task;
 }
 
 void TaskProcessor::invalidateTask(unsigned int taskID)
 {
-    AutoLock lock(mutex);
-    auto t = getCurrentTask();
-    if (t != nullptr) {
-        if ((t->getID() == taskID) || (t->getParentID() == taskID)) {
-            t->invalidate();
+    auto lock = threadRunner->lockGuard();
+    auto tc = getCurrentTask();
+    if (tc != nullptr) {
+        if ((tc->getID() == taskID) || (tc->getParentID() == taskID)) {
+            tc->invalidate();
         }
     }
 
-    for (const auto& t : taskQueue) {
-        if ((t->getID() == taskID) || (t->getParentID() == taskID)) {
-            t->invalidate();
+    for (auto&& tq : taskQueue) {
+        if ((tq->getID() == taskID) || (tq->getParentID() == taskID)) {
+            tq->invalidate();
         }
     }
 }
@@ -142,17 +144,17 @@ std::deque<std::shared_ptr<GenericTask>> TaskProcessor::getTasklist()
 {
     std::deque<std::shared_ptr<GenericTask>> taskList;
 
-    AutoLock lock(mutex);
-    auto t = getCurrentTask();
+    auto lock = threadRunner->lockGuard();
+    auto tc = getCurrentTask();
 
     // if there is no current task, then the queues are empty
     // and we do not have to allocate the array
-    if (t == nullptr)
+    if (tc == nullptr)
         return taskList;
 
-    taskList.push_back(t);
+    taskList.push_back(tc);
 
-    std::copy_if(taskQueue.begin(), taskQueue.end(), std::back_inserter(taskList), [](const auto& task) { return task->isValid(); });
+    std::copy_if(taskQueue.begin(), taskQueue.end(), std::back_inserter(taskList), [](auto&& task) { return task->isValid(); });
 
     return taskList;
 }
@@ -170,9 +172,9 @@ TPFetchOnlineContentTask::TPFetchOnlineContentTask(std::shared_ptr<ContentManage
     , timer(std::move(timer))
     , service(std::move(service))
     , layout(std::move(layout))
+    , unscheduled_refresh(unscheduled_refresh)
 {
     this->cancellable = cancellable;
-    this->unscheduled_refresh = unscheduled_refresh;
     this->taskType = FetchOnlineContent;
 }
 
@@ -189,7 +191,7 @@ void TPFetchOnlineContentTask::run()
             log_debug("Scheduling another task for online service: {}",
                 service->getServiceName().c_str());
 
-            if ((service->getRefreshInterval() > 0) || unscheduled_refresh) {
+            if ((service->getRefreshInterval() > std::chrono::seconds::zero()) || unscheduled_refresh) {
                 auto t = std::make_shared<TPFetchOnlineContentTask>(
                     content, task_processor, timer, service, layout, cancellable, unscheduled_refresh);
                 task_processor->addTask(t);
@@ -202,7 +204,7 @@ void TPFetchOnlineContentTask::run()
     }
     service->decTaskCount();
     if (service->getTaskCount() == 0) {
-        if ((service->getRefreshInterval() > 0) && !unscheduled_refresh) {
+        if ((service->getRefreshInterval() > std::chrono::seconds::zero()) && !unscheduled_refresh) {
             timer->addTimerSubscriber(
                 content.get(),
                 service->getRefreshInterval(),

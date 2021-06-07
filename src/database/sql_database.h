@@ -35,6 +35,7 @@
 #include <mutex>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 
 #include "database.h"
 
@@ -78,6 +79,7 @@ public:
 class SQLDatabase : public Database {
 public:
     /* methods to override in subclasses */
+    virtual std::string quote(std::string_view str) const = 0;
     virtual std::string quote(std::string str) const = 0;
     virtual std::string quote(const char* str) const = 0;
     virtual std::string quote(int val) const = 0;
@@ -87,10 +89,13 @@ public:
     virtual std::string quote(bool val) const = 0;
     virtual std::string quote(char val) const = 0;
     virtual std::string quote(long long val) const = 0;
+
+    virtual void beginTransaction(const std::string_view& tName) = 0;
+    virtual void rollback(const std::string_view& tName) = 0;
+    virtual void commit(const std::string_view& tName) = 0;
+
     virtual std::shared_ptr<SQLResult> select(const char* query, int length) = 0;
     virtual int exec(const char* query, int length, bool getLastInsertId = false) = 0;
-
-    void dbReady();
 
     /* wrapper functions for select and exec */
     std::shared_ptr<SQLResult> select(const std::string& buf)
@@ -102,10 +107,9 @@ public:
         auto s = buf.str();
         return select(s.c_str(), s.length());
     }
-    int exec(const std::ostringstream& buf, bool getLastInsertId = false)
+    int exec(const std::string& query, bool getLastInsertId = false)
     {
-        auto s = buf.str();
-        return exec(s.c_str(), s.length(), getLastInsertId);
+        return exec(query.c_str(), query.length(), getLastInsertId);
     }
 
     void addObject(std::shared_ptr<CdsObject> object, int* changedContainer) override;
@@ -121,8 +125,6 @@ public:
 
     std::shared_ptr<CdsObject> loadObjectByServiceID(const std::string& serviceID) override;
     std::unique_ptr<std::vector<int>> getServiceObjectIDs(char servicePrefix) override;
-
-    std::string findFolderImage(int id, std::string trackArtBase) override;
 
     /* accounting methods */
     int getTotalFiles(bool isVirtual = false, const std::string& mimeType = "", const std::string& upnpClass = "") override;
@@ -164,6 +166,8 @@ public:
     int ensurePathExistence(fs::path path, int* changedContainer) override;
 
     std::string getFsRootName() override;
+    static std::string getSortCapabilities();
+    static std::string getSearchCapabilities();
 
     void clearFlagInDB(int flag) override;
 
@@ -177,35 +181,48 @@ protected:
 
     char table_quote_begin;
     char table_quote_end;
+    bool use_transaction;
+    bool inTransaction;
+
+    std::recursive_mutex sqlMutex;
+    using SqlAutoLock = std::lock_guard<decltype(sqlMutex)>;
 
 private:
-    std::string sql_query;
+    std::string sql_browse_query;
+    std::string sql_search_query;
+    std::string sql_meta_query;
 
     std::shared_ptr<CdsObject> createObjectFromRow(const std::unique_ptr<SQLRow>& row);
     std::shared_ptr<CdsObject> createObjectFromSearchRow(const std::unique_ptr<SQLRow>& row);
     std::map<std::string, std::string> retrieveMetadataForObject(int objectId);
 
+    enum class Operation {
+        Insert,
+        Update,
+        Delete
+    };
+
     /* helper class and helper function for addObject and updateObject */
     class AddUpdateTable {
     public:
-        AddUpdateTable(const std::string& tableName, const std::map<std::string, std::string>& dict, const std::string& operation)
+        AddUpdateTable(std::string tableName, std::map<std::string, std::string> dict, Operation operation)
+            : tableName(std::move(tableName))
+            , dict(std::move(dict))
+            , operation(operation)
         {
-            this->tableName = tableName;
-            this->dict = dict;
-            this->operation = operation;
         }
-        std::string getTableName() const { return tableName; }
-        std::map<std::string, std::string> getDict() const { return dict; }
-        std::string getOperation() const { return operation; }
+        [[nodiscard]] std::string getTableName() const { return tableName; }
+        [[nodiscard]] std::map<std::string, std::string> getDict() const { return dict; }
+        [[nodiscard]] Operation getOperation() const { return operation; }
 
     protected:
         std::string tableName;
         std::map<std::string, std::string> dict;
-        std::string operation;
+        Operation operation;
     };
-    std::vector<std::shared_ptr<AddUpdateTable>> _addUpdateObject(const std::shared_ptr<CdsObject>& obj, bool isUpdate, int* changedContainer);
+    std::vector<std::shared_ptr<AddUpdateTable>> _addUpdateObject(const std::shared_ptr<CdsObject>& obj, Operation op, int* changedContainer);
 
-    void generateMetadataDBOperations(const std::shared_ptr<CdsObject>& obj, bool isUpdate,
+    void generateMetadataDBOperations(const std::shared_ptr<CdsObject>& obj, Operation op,
         std::vector<std::shared_ptr<AddUpdateTable>>& operations);
 
     std::unique_ptr<std::ostringstream> sqlForInsert(const std::shared_ptr<CdsObject>& obj, const std::shared_ptr<AddUpdateTable>& addUpdateTable) const;
@@ -221,20 +238,19 @@ private:
         const std::vector<int32_t>& items,
         const std::vector<int32_t>& containers, bool all);
 
-    virtual std::unique_ptr<ChangedContainers> _purgeEmptyContainers(std::unique_ptr<ChangedContainers>& maybeEmpty);
+    virtual std::unique_ptr<ChangedContainers> _purgeEmptyContainers(const std::unique_ptr<ChangedContainers>& maybeEmpty);
 
     /* helpers for autoscan */
     void _removeAutoscanDirectory(int autoscanID);
     int _getAutoscanObjectID(int autoscanID);
     void _autoscanChangePersistentFlag(int objectID, bool persistent);
     static std::shared_ptr<AutoscanDirectory> _fillAutoscanDirectory(const std::unique_ptr<SQLRow>& row);
-    int _getAutoscanDirectoryInfo(int objectID, const std::string& field);
     std::unique_ptr<std::vector<int>> _checkOverlappingAutoscans(const std::shared_ptr<AutoscanDirectory>& adir);
 
     /* location helper: filesystem path or virtual path to db location*/
-    static std::string addLocationPrefix(char prefix, const std::string& path);
+    static std::string addLocationPrefix(char prefix, const fs::path& path);
     /* location helpers: db location to filesystem path */
-    static fs::path stripLocationPrefix(std::string dbLocation, char* prefix = nullptr);
+    static fs::path stripLocationPrefix(const std::string& dbLocation, char* prefix = nullptr);
 
     std::shared_ptr<CdsObject> checkRefID(const std::shared_ptr<CdsObject>& obj);
     int createContainer(int parentID, std::string name, const std::string& virtualPath, bool isVirtual, const std::string& upnpClass, int refID, const std::map<std::string, std::string>& itemMetadata);

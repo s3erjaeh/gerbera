@@ -148,6 +148,11 @@
 					"editable": false
 				},
 				{
+					"item": "/server/storage/attribute::use-transactions",
+					"caption": "Transactions",
+					"editable": false
+				},
+				{
 					"item": "/server/storage/sqlite3",
 					"caption": "SQLite",
 					"type": "Element",
@@ -346,6 +351,21 @@
 							"item": "/import/autoscan/timed/directory/attribute::hidden-files",
 							"caption": "Import Hidden Files",
 							"editable": true
+						},
+						{
+							"item": "/import/autoscan/timed/directory/attribute::scan-count",
+							"caption": "Active Scan Count",
+							"editable": false
+						},
+						{
+							"item": "/import/autoscan/timed/directory/attribute::task-count",
+							"caption": "Active Task Count",
+							"editable": false
+						},
+						{
+							"item": "/import/autoscan/timed/directory/attribute::last-modified",
+							"caption": "Last Modified",
+							"editable": false
 						}
 					]
 				},
@@ -408,6 +428,37 @@
 						{
 							"item": "/import/layout/path/attribute::to",
 							"caption": "To",
+							"editable": true
+						}
+					]
+				},
+				{
+					"item": "/import/system-directories/add-path",
+					"caption": "System Directories",
+					"type": "List",
+					"editable": true,
+					"children": [
+						{
+							"item": "/import/system-directories/add-path/attribute::name",
+							"caption": "Name",
+							"editable": true
+						}
+					]
+				},
+				{
+					"item": "/import/scripting/virtual-layout/genre-map/genre",
+					"caption": "Genre Map",
+					"type": "List",
+					"editable": true,
+					"children": [
+						{
+							"item": "/import/scripting/virtual-layout/genre-map/genre/attribute::from",
+							"caption": "Name",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/genre-map/genre/attribute::to",
+							"caption": "Value",
 							"editable": true
 						}
 					]
@@ -484,6 +535,11 @@
 					"editable": true
 				},
 				{
+					"item": "/import/scripting/custom-script",
+					"caption": "Custom Script",
+					"editable": true
+				},
+				{
 					"item": "/import/scripting/playlist-script",
 					"caption": "Playlist Script",
 					"editable": true
@@ -496,7 +552,12 @@
 				{
 					"item": "/import/scripting/virtual-layout/attribute::type",
 					"caption": "Virtual Layout Type",
-					"editable": false
+					"editable": true
+				},
+				{
+					"item": "/import/scripting/virtual-layout/attribute::audio-layout",
+					"caption": "Audio Layout Type",
+					"editable": true
 				},
 				{
 					"item": "/import/scripting/playlist-script/attribute::create-link",
@@ -517,6 +578,62 @@
 					"item": "/import/playlist-charset",
 					"caption": "Playlist Charset",
 					"editable": false
+				},
+				{
+					"item": "/import/scripting/virtual-layout/import-script/script-option",
+					"caption": "Script Options",
+					"type": "List",
+					"editable": true,
+					"children": [
+						{
+							"item": "/import/scripting/virtual-layout/import-script/script-option/option/attribute::name",
+							"caption": "Name",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/import-script/script-option/option/attribute::value",
+							"caption": "Value",
+							"editable": true
+						}
+					]
+				},
+				{
+					"item": "/import/scripting/virtual-layout/structured-layout",
+					"caption": "Structured Layout Settings",
+					"type": "Element",
+					"editable": true,
+					"children": [
+						{
+							"item": "/import/scripting/virtual-layout/structured-layout/attribute::skip-chars",
+							"caption": "Initial Characters to skip",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/structured-layout/attribute::album-box",
+							"caption": "Album Box Type",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/structured-layout/attribute::artist-box",
+							"caption": "Artist Box Type",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/structured-layout/attribute::genre-box",
+							"caption": "Genre Box Type",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/structured-layout/attribute::track-box",
+							"caption": "Track Box Type",
+							"editable": true
+						},
+						{
+							"item": "/import/scripting/virtual-layout/structured-layout/attribute::div-char",
+							"caption": "Surrounding Char",
+							"editable": true
+						}
+					]
 				}
 			]
 		},
@@ -861,11 +978,6 @@
 							"editable": true
 						},
 						{
-							"item": "/transcoding/profiles/profile/attribute::use-chunked-encoding",
-							"caption": "use-chunked-encoding",
-							"editable": true
-						},
-						{
 							"item": "/transcoding/profiles/profile/attribute::accept-ogg-theora",
 							"caption": "accept-ogg-theora",
 							"editable": true
@@ -942,6 +1054,68 @@
 						{
 							"item": "/clients/client/attribute::flags",
 							"caption": "Flags",
+							"editable": true
+						}
+					]
+				}
+			]
+		},
+		{
+			"item": "/server/upnp",
+			"caption": "UPnP",
+			"type": "Element",
+			"editable": true,
+			"children": [
+				{
+					"item": "/server/upnp/album-properties/upnp-property",
+					"caption": "Album-Properties",
+					"type": "List",
+					"editable": true,
+					"children": [
+						{
+							"item": "/server/upnp/album-properties/upnp-property/attribute::upnp-tag",
+							"caption": "UPnP Tag",
+							"editable": true
+						},
+						{
+							"item": "/server/upnp/album-properties/upnp-property/attribute::meta-data",
+							"caption": "Metadata",
+							"editable": true
+						}
+					]
+				},
+				{
+					"item": "/server/upnp/artist-properties/upnp-property",
+					"caption": "Artist-Properties",
+					"type": "List",
+					"editable": true,
+					"children": [
+						{
+							"item": "/server/upnp/artist-properties/upnp-property/attribute::upnp-tag",
+							"caption": "UPnP Tag",
+							"editable": true
+						},
+						{
+							"item": "/server/upnp/artist-properties/upnp-property/attribute::meta-data",
+							"caption": "Metadata",
+							"editable": true
+						}
+					]
+				},
+				{
+					"item": "/server/upnp/title-properties/upnp-property",
+					"caption": "Title-Properties",
+					"type": "List",
+					"editable": true,
+					"children": [
+						{
+							"item": "/server/upnp/title-properties/upnp-property/attribute::upnp-tag",
+							"caption": "UPnP Tag",
+							"editable": true
+						},
+						{
+							"item": "/server/upnp/title-properties/upnp-property/attribute::meta-data",
+							"caption": "Metadata",
 							"editable": true
 						}
 					]

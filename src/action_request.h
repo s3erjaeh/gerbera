@@ -83,7 +83,7 @@ protected:
 public:
     /// \brief The Constructor takes the values from the upnp_request and fills in internal variables.
     /// \param *upnp_request Pointer to the Upnp_Action_Request structure.
-    explicit ActionRequest(const std::shared_ptr<Context>& context, UpnpActionRequest* upnp_request);
+    explicit ActionRequest(std::shared_ptr<Context> context, UpnpActionRequest* upnp_request);
 
     /// \brief Returns the name of the action.
     std::string getActionName() const;
@@ -97,9 +97,12 @@ public:
     /// \brief Returns the XML representation of the request, that comes to us.
     std::unique_ptr<pugi::xml_document> getRequest() const;
 
+    /// \brief Returns the client quirks
+    std::shared_ptr<Quirks> getQuirks() const;
+
     /// \brief Sets the response (XML created outside as the answer to the request)
     /// \param response XML holding the action response.
-    void setResponse(std::unique_ptr<pugi::xml_document>& response);
+    void setResponse(std::unique_ptr<pugi::xml_document> response);
 
     /// \brief Set the error code for the SDK.
     /// \param errCode UPnP error code.

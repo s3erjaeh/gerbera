@@ -67,7 +67,7 @@ class WebRequestHandler : public RequestHandler {
 protected:
     std::shared_ptr<web::SessionManager> sessionManager;
 
-    bool checkRequestCalled;
+    bool checkRequestCalled { false };
 
     /// \brief Decoded URL parameters are stored as a dictionary.
     std::map<std::string, std::string> params;
@@ -133,11 +133,11 @@ protected:
     /// \return true if accounts are enabled, false if not
     bool accountsEnabled() const { return config->getBoolOption(CFG_SERVER_UI_ACCOUNTS_ENABLED); }
 
-    static std::string mapAutoscanType(int type);
+    static std::string_view mapAutoscanType(int type);
 
 public:
     /// \brief Constructor, currently empty.
-    WebRequestHandler(std::shared_ptr<ContentManager> content);
+    explicit WebRequestHandler(std::shared_ptr<ContentManager> content);
 
     /// \brief Returns information about the requested content.
     /// \param filename Requested URL

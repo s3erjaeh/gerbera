@@ -34,17 +34,16 @@
 
 #include "cds_objects.h"
 #include "config/config_manager.h"
+#include "curl_online_service.h"
 #include "metadata/metadata_handler.h"
-#include "online_service.h"
 #include "util/tools.h"
 
 SopCastContentHandler::SopCastContentHandler(const std::shared_ptr<Context>& context)
-    : config(context->getConfig())
-    , database(context->getDatabase())
+    : CurlContentHandler(context)
 {
 }
 
-void SopCastContentHandler::setServiceContent(std::unique_ptr<pugi::xml_document>& service)
+void SopCastContentHandler::setServiceContent(std::unique_ptr<pugi::xml_document> service)
 {
     service_xml = std::move(service);
     auto root = service_xml->document_element();
@@ -119,7 +118,7 @@ std::shared_ptr<CdsObject> SopCastContentHandler::getNextObject()
     return nullptr;
 }
 
-std::shared_ptr<CdsObject> SopCastContentHandler::getObject(const std::string& groupName, const pugi::xml_node& channel) const
+std::shared_ptr<CdsObject> SopCastContentHandler::getObject(const std::string& groupName, const pugi::xml_node& channel)
 {
     auto item = std::make_shared<CdsItemExternalURL>();
     auto resource = std::make_shared<CdsResource>(CH_DEFAULT);
@@ -210,7 +209,7 @@ std::shared_ptr<CdsObject> SopCastContentHandler::getObject(const std::string& g
 
     try {
         item->validate();
-        return item;
+        return std::move(item);
     } catch (const std::runtime_error& ex) {
         log_warning("Failed to validate newly created SopCast item: {}",
             ex.what());

@@ -20,6 +20,7 @@ public:
     virtual void SetUp()
     {
         config = std::make_shared<ConfigMock>();
+
         database = std::make_shared<DatabaseMock>(config);
         context = std::make_shared<Context>(config, nullptr, nullptr, database, nullptr, nullptr);
 
@@ -55,9 +56,13 @@ TEST_F(UpnpXmlTest, RenderObjectContainer)
     obj->setMetadata(M_CONDUCTOR, "Conductor");
     obj->setMetadata(M_ORCHESTRA, "Orchestra");
     obj->setMetadata(M_UPNP_DATE, "2001-01-01");
+
     // albumArtURI
-    database->findFolderImageMap.clear();
-    database->findFolderImageMap[fmt::to_string(obj->getID())] = "10";
+    auto resource = std::make_shared<CdsResource>(CH_CONTAINERART);
+    resource->addAttribute(R_PROTOCOLINFO, renderProtocolInfo("jpg"));
+    resource->addAttribute(R_RESOURCE_FILE, "/home/resource/cover.jpg");
+    resource->addParameter(RESOURCE_CONTENT_TYPE, ID3_ALBUM_ART);
+    obj->addResource(resource);
 
     std::ostringstream expectedXml;
     expectedXml << "<DIDL-Lite>\n";
@@ -65,14 +70,14 @@ TEST_F(UpnpXmlTest, RenderObjectContainer)
     expectedXml << "<dc:title>Title</dc:title>\n";
     expectedXml << "<upnp:class>object.container.album.musicAlbum</upnp:class>\n";
     expectedXml << "<dc:creator>Creator</dc:creator>\n";
-    expectedXml << "<upnp:artist>Creator</upnp:artist>\n";
+    expectedXml << "<dc:date>2001-01-01</dc:date>\n";
     expectedXml << "<upnp:albumArtist>Creator</upnp:albumArtist>\n";
+    expectedXml << "<upnp:artist>Creator</upnp:artist>\n";
     expectedXml << "<upnp:composer>Composer</upnp:composer>\n";
     expectedXml << "<upnp:conductor>Conductor</upnp:conductor>\n";
-    expectedXml << "<upnp:orchestra>Orchestra</upnp:orchestra>\n";
     expectedXml << "<upnp:date>2001-01-01</upnp:date>\n";
-    expectedXml << "<dc:date>2001-01-01</dc:date>\n";
-    expectedXml << "<upnp:albumArtURI>http://server/content/media/object_id/10/res_id/0</upnp:albumArtURI>\n";
+    expectedXml << "<upnp:orchestra>Orchestra</upnp:orchestra>\n";
+    expectedXml << "<upnp:albumArtURI>http://server/content/media/object_id/1/res_id/0/rct/aa/rh/11</upnp:albumArtURI>\n";
     expectedXml << "</container>\n";
     expectedXml << "</DIDL-Lite>\n";
 

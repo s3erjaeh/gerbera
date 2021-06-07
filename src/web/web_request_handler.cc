@@ -46,7 +46,6 @@ namespace web {
 WebRequestHandler::WebRequestHandler(std::shared_ptr<ContentManager> content)
     : RequestHandler(std::move(content))
     , sessionManager(this->content->getContext()->getSessionManager())
-    , checkRequestCalled(false)
 {
 }
 
@@ -214,7 +213,7 @@ std::unique_ptr<IOHandler> WebRequestHandler::open(enum UpnpOpenFileMode mode)
 
     auto io_handler = std::make_unique<MemIOHandler>(output);
     io_handler->open(mode);
-    return io_handler;
+    return std::move(io_handler);
 }
 
 std::unique_ptr<IOHandler> WebRequestHandler::open(const char* filename, enum UpnpOpenFileMode mode)
@@ -266,16 +265,15 @@ void WebRequestHandler::appendTask(const std::shared_ptr<GenericTask>& task, pug
     taskEl.append_attribute("text") = task->getDescription().c_str();
 }
 
-std::string WebRequestHandler::mapAutoscanType(int type)
+std::string_view WebRequestHandler::mapAutoscanType(int type)
 {
     switch (type) {
     case 1:
         return "ui";
     case 2:
         return "persistent";
-    default:
-        return "none";
     }
+    return "none";
 }
 
 } // namespace web

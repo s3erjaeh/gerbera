@@ -32,16 +32,16 @@
 #include "upnp_xml.h"
 #include "util/upnp_clients.h"
 
+#include <fmt/chrono.h>
+
 web::clients::clients(std::shared_ptr<ContentManager> content)
     : WebRequestHandler(std::move(content))
 {
 }
 
-static std::string steady_clock_to_string(std::chrono::steady_clock::time_point t)
+static std::string seconds_to_string(const std::chrono::seconds& t)
 {
-    auto systime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()
-        + std::chrono::duration_cast<std::chrono::system_clock::duration>(t - std::chrono::steady_clock::now()));
-    return trimString(std::asctime(std::localtime(&systime)));
+    return fmt::format("{:%a %b %d %H:%M:%S %Y}", fmt::localtime(t.count()));
 }
 
 void web::clients::process()
@@ -53,19 +53,19 @@ void web::clients::process()
     xml2JsonHints->setArrayName(clients, "client");
 
     auto arr = content->getContext()->getClients()->getClientList();
-    for (const auto& obj : *arr) {
+    for (auto&& obj : *arr) {
         auto item = clients.append_child("client");
         auto ip = sockAddrGetNameInfo(reinterpret_cast<const struct sockaddr*>(&obj.addr));
         item.append_attribute("ip") = ip.c_str();
         auto hostName = getHostName(reinterpret_cast<const struct sockaddr*>(&obj.addr));
         item.append_attribute("host") = hostName.c_str();
-        item.append_attribute("time") = steady_clock_to_string(obj.age).c_str();
-        item.append_attribute("last") = steady_clock_to_string(obj.last).c_str();
+        item.append_attribute("time") = seconds_to_string(obj.age).c_str();
+        item.append_attribute("last") = seconds_to_string(obj.last).c_str();
         item.append_attribute("userAgent") = obj.userAgent.c_str();
         item.append_attribute("name") = obj.pInfo->name.c_str();
         item.append_attribute("match") = obj.pInfo->match.c_str();
         item.append_attribute("flags") = ClientConfig::mapFlags(obj.pInfo->flags).c_str();
-        item.append_attribute("matchType") = ClientConfig::mapMatchType(obj.pInfo->matchType).c_str();
-        item.append_attribute("clientType") = ClientConfig::mapClientType(obj.pInfo->type).c_str();
+        item.append_attribute("matchType") = ClientConfig::mapMatchType(obj.pInfo->matchType).data();
+        item.append_attribute("clientType") = ClientConfig::mapClientType(obj.pInfo->type).data();
     }
 }

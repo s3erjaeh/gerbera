@@ -30,6 +30,8 @@ Device Flags
 The device flags have the following meaning
 
 -  ``SAMSUNG``: 0x01, add "CaptionInfo.sec" to video header
+-  ``SAMSUNG_BOOKMARK_SEC``: 0x02, restore last played position when the media is played again (only for Samsung). Not applicable for transcoded media
+-  ``SAMSUNG_BOOKMARK_MSEC``: 0x04, same as SAMSUNG_BOOKMARK_SEC, but the bookmark value is recieved from the Samsung TV as msec
 
 Manual Overrides
 ~~~~~~~~~~~~~~~~
@@ -84,6 +86,8 @@ Denon
 -  AVR-4308
 -  S-52
 -  ASD-3N
+-  RCD-N9
+-  HEOS Multiroom, all devices with buildin HEOS by Denon or Marantz
 
 D-Link
 ~~~~~~
@@ -167,6 +171,12 @@ Medion
 ~~~~~~
 
 -  MD 85651
+
+Microsoft
+~~~~~~~~~
+
+-  Windows Explorer (Browse in directory and play with selectable player)
+-  Windows MediaPlayer 12 (downloads all item info and builds up cache)
 
 NeoDigits
 ~~~~~~~~~

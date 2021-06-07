@@ -96,32 +96,40 @@ public:
 
 class Option : public ConfigOption {
 public:
-    explicit Option(const std::string& option) { this->option = option; }
+    explicit Option(std::string option)
+        : option(std::move(option))
+    {
+    }
 
     std::string getOption() const override { return option; }
 
-protected:
+private:
     std::string option;
 };
 
 class IntOption : public ConfigOption {
 public:
-    explicit IntOption(int option) { this->option = option; }
+    explicit IntOption(int option)
+        : option(option)
+    {
+    }
 
     int getIntOption() const override { return option; }
 
-protected:
+private:
     int option;
 };
 
 class BoolOption : public ConfigOption {
 public:
-    explicit BoolOption(bool option) { this->option = option; }
+    explicit BoolOption(bool option)
+        : option(option)
+    {
+    }
 
     bool getBoolOption() const override { return option; }
 
-protected:
-    BoolOption() = default;
+private:
     bool option;
 };
 
@@ -132,7 +140,7 @@ public:
     {
         this->origSize = this->option.size();
         size_t i = 0;
-        for (const auto& [key, val] : this->option) {
+        for (auto&& [key, val] : this->option) {
             this->indexMap[i] = key;
             i++;
         }
@@ -151,7 +159,7 @@ public:
 
     void setValue(size_t keyIndex, const std::string& value);
 
-protected:
+private:
     std::map<std::string, std::string> option;
     size_t origSize;
     std::map<size_t, std::string> indexMap;
@@ -180,7 +188,7 @@ public:
 
     void setItem(size_t index, const std::string& value);
 
-protected:
+private:
     std::vector<std::string> option;
     size_t origSize;
     std::map<size_t, size_t> indexMap;
@@ -195,30 +203,28 @@ public:
 
     std::shared_ptr<AutoscanList> getAutoscanListOption() const override { return option; }
 
-protected:
+private:
     std::shared_ptr<AutoscanList> option;
 };
 
 class ClientConfigListOption : public ConfigOption {
 public:
     explicit ClientConfigListOption(std::shared_ptr<ClientConfigList> option)
+        : option(std::move(option))
     {
-        this->option = std::move(option);
     }
-
     std::shared_ptr<ClientConfigList> getClientConfigListOption() const override { return option; }
 
-protected:
+private:
     std::shared_ptr<ClientConfigList> option;
 };
 
 class DirectoryTweakOption : public ConfigOption {
 public:
     explicit DirectoryTweakOption(std::shared_ptr<DirectoryConfigList> option)
+        : option(std::move(option))
     {
-        this->option = std::move(option);
     }
-
     std::shared_ptr<DirectoryConfigList> getDirectoryTweakOption() const override { return option; }
 
 protected:
@@ -228,10 +234,9 @@ protected:
 class TranscodingProfileListOption : public ConfigOption {
 public:
     explicit TranscodingProfileListOption(std::shared_ptr<TranscodingProfileList> option)
+        : option(std::move(option))
     {
-        this->option = std::move(option);
     }
-
     std::shared_ptr<TranscodingProfileList> getTranscodingProfileListOption() const override
     {
         return option;

@@ -31,22 +31,19 @@
 #ifndef __CONTENT_MANAGER_H__
 #define __CONTENT_MANAGER_H__
 
-#include <condition_variable>
 #include <deque>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
-
-#include <dirent.h>
 
 #include "autoscan.h"
 #include "cds_objects.h"
 #include "common.h"
 #include "context.h"
 #include "util/generic_task.h"
+#include "util/thread_runner.h"
 #include "util/timer.h"
 
 #ifdef HAVE_JS
@@ -56,14 +53,14 @@ class PlaylistParserScript;
 #include "scripting/playlist_parser_script.h"
 #else
 class ScriptingRuntime;
-#endif
+#endif // HAVE_JS
 
 #include "layout/layout.h"
 
 #include "autoscan_list.h"
 #ifdef HAVE_INOTIFY
 #include "autoscan_inotify.h"
-#endif
+#endif // HAVE_INOTIFY
 
 #include "config/directory_tweak.h"
 #include "transcoding/transcoding.h"
@@ -74,23 +71,23 @@ class ScriptingRuntime;
 
 #include "util/executor.h"
 
-// forward declaration
-class Server;
-class Runtime;
-class LastFm;
+// forward declarations
 class ContentManager;
+class LastFm;
+class Runtime;
+class Server;
 class TaskProcessor;
 
 class CMAddFileTask : public GenericTask, public std::enable_shared_from_this<CMAddFileTask> {
 protected:
     std::shared_ptr<ContentManager> content;
-    fs::path path;
+    fs::directory_entry dirEnt;
     fs::path rootpath;
     AutoScanSetting asSetting;
 
 public:
     CMAddFileTask(std::shared_ptr<ContentManager> content,
-        fs::path path, fs::path rootpath, AutoScanSetting& asSetting, bool cancellable = true);
+        fs::directory_entry dirEnt, fs::path rootpath, AutoScanSetting& asSetting, bool cancellable = true);
     fs::path getPath();
     fs::path getRootPath();
     void run() override;
@@ -146,8 +143,12 @@ class ContentManager : public Timer::Subscriber, public std::enable_shared_from_
 public:
     ContentManager(const std::shared_ptr<Context>& context,
         const std::shared_ptr<Server>& server, std::shared_ptr<Timer> timer);
-    void run();
     ~ContentManager() override;
+
+    ContentManager(const ContentManager&) = delete;
+    ContentManager& operator=(const ContentManager&) = delete;
+
+    void run();
     void shutdown();
 
     void timerNotify(std::shared_ptr<Timer::Parameter> parameter) override;
@@ -166,18 +167,18 @@ public:
     /* the functions below return true if the task has been enqueued */
 
     /// \brief Adds a file or directory to the database.
-    /// \param path absolute path to the file
+    /// \param dirEnt absolute path to the file
     /// \param recursive recursive add (process subdirecotories)
     /// \param async queue task or perform a blocking call
     /// \param hidden true allows to import hidden files, false ignores them
     /// \param rescanResource true allows to reload a directory containing a resource
     /// \param queue for immediate processing or in normal order
     /// \return object ID of the added file - only in blockign mode, when used in async mode this function will return INVALID_OBJECT_ID
-    int addFile(const fs::path& path, AutoScanSetting& asSetting,
+    int addFile(const fs::directory_entry& dirEnt, AutoScanSetting& asSetting,
         bool async = true, bool lowPriority = false, bool cancellable = true);
 
     /// \brief Adds a file or directory to the database.
-    /// \param path absolute path to the file
+    /// \param dirEnt absolute path to the file
     /// \param rootpath absolute path to the container root
     /// \param recursive recursive add (process subdirecotories)
     /// \param async queue task or perform a blocking call
@@ -185,7 +186,7 @@ public:
     /// \param rescanResource true allows to reload a directory containing a resource
     /// \param queue for immediate processing or in normal order
     /// \return object ID of the added file - only in blockign mode, when used in async mode this function will return INVALID_OBJECT_ID
-    int addFile(const fs::path& path, const fs::path& rootpath, AutoScanSetting& asSetting,
+    int addFile(const fs::directory_entry& dirEnt, const fs::path& rootpath, AutoScanSetting& asSetting,
         bool async = true, bool lowPriority = false, bool cancellable = true);
 
     int ensurePathExistence(fs::path path);
@@ -197,9 +198,7 @@ public:
     void updateObject(int objectID, const std::map<std::string, std::string>& parameters);
 
     // returns nullptr if file does not exist or is ignored due to configuration
-    std::shared_ptr<CdsObject> createObjectFromFile(const fs::path& path, bool followSymlinks,
-        bool magic = true,
-        bool allow_fifo = false);
+    std::shared_ptr<CdsObject> createObjectFromFile(const fs::directory_entry& dirEnt, bool followSymlinks, bool allow_fifo = false);
 
 #ifdef ONLINE_SERVICES
     /// \brief Creates a layout based from data that is obtained from an
@@ -224,10 +223,11 @@ public:
 
     /// \brief Adds an object to the database.
     /// \param obj object to add
+    /// \param firstChild indicate that this obj is the first child in parent container
     ///
     /// parentID of the object must be set before this method.
     /// The ID of the object provided is ignored and generated by this method
-    void addObject(const std::shared_ptr<CdsObject>& obj);
+    void addObject(const std::shared_ptr<CdsObject>& obj, bool firstChild);
 
     /// \brief Adds a virtual container chain specified by path.
     /// \param container path separated by '/'. Slashes in container
@@ -237,11 +237,11 @@ public:
     /// \param lastRefID reference id of the last container in the chain,
     /// INVALID_OBJECT_ID indicates that the id will not be set.
     /// \return ID of the last container in the chain.
-    int addContainerChain(const std::string& chain, const std::string& lastClass = "",
+    std::pair<int, bool> addContainerChain(const std::string& chain, const std::string& lastClass = "",
         int lastRefID = INVALID_OBJECT_ID, const std::shared_ptr<CdsObject>& origObj = nullptr);
 
     /// \return ID of the last container in the chain.
-    int addContainerTree(const std::vector<std::shared_ptr<CdsObject>>& chain);
+    std::pair<int, bool> addContainerTree(const std::vector<std::shared_ptr<CdsObject>>& chain);
 
     /// \brief Adds a virtual container specified by parentID and title
     /// \param parentID the id of the parent.
@@ -278,7 +278,7 @@ public:
     /// \brief handles the recreation of a persistent autoscan directory
     void handlePersistentAutoscanRecreate(const std::shared_ptr<AutoscanDirectory>& adir);
 
-    void rescanDirectory(const std::shared_ptr<AutoscanDirectory>& adir, int objectId, std::string descPath = "", bool cancellable = true);
+    void rescanDirectory(const std::shared_ptr<AutoscanDirectory>& adir, int objectId, fs::path descPath = {}, bool cancellable = true);
 
     /// \brief instructs ContentManager to reload scripting environment
     void reloadLayout();
@@ -321,15 +321,13 @@ protected:
     std::shared_ptr<UpdateManager> update_manager;
     std::shared_ptr<web::SessionManager> session_manager;
     std::shared_ptr<Context> context;
+    ///\brief cache for containers while creating new layout
+    std::map<std::string, std::shared_ptr<CdsContainer>> containerMap;
 
     std::shared_ptr<Timer> timer;
     std::shared_ptr<TaskProcessor> task_processor;
     std::shared_ptr<ScriptingRuntime> scripting_runtime;
     std::shared_ptr<LastFm> last_fm;
-
-    std::recursive_mutex mutex;
-    using AutoLock = std::lock_guard<decltype(mutex)>;
-    using AutoLockU = std::unique_lock<decltype(mutex)>;
 
     std::map<std::string, std::string> mimetype_contenttype_map;
 
@@ -341,27 +339,26 @@ protected:
 
     std::vector<std::shared_ptr<Executor>> process_list;
 
-    int addFileInternal(const fs::path& path, const fs::path& rootpath,
+    int addFileInternal(const fs::directory_entry& dirEnt, const fs::path& rootpath,
         AutoScanSetting& asSetting,
         bool async = true,
         bool lowPriority = false,
         unsigned int parentTaskID = 0,
         bool cancellable = true);
-    int _addFile(const fs::path& path, fs::path rootPath, AutoScanSetting& asSetting,
+    int _addFile(const fs::directory_entry& dirEnt, fs::path rootPath, AutoScanSetting& asSetting,
         const std::shared_ptr<CMAddFileTask>& task = nullptr);
 
     void _removeObject(const std::shared_ptr<AutoscanDirectory>& adir, int objectID, bool rescanResource, bool all);
 
-    void _rescanDirectory(std::shared_ptr<AutoscanDirectory>& adir, int containerID, const std::shared_ptr<GenericTask>& task = nullptr);
+    void _rescanDirectory(const std::shared_ptr<AutoscanDirectory>& adir, int containerID, const std::shared_ptr<GenericTask>& task = nullptr);
     /* for recursive addition */
-    void addRecursive(std::shared_ptr<AutoscanDirectory>& adir, const fs::path& path, bool followSymlinks, bool hidden, const std::shared_ptr<CMAddFileTask>& task);
-    static bool isLink(const fs::path& path, bool allowLinks);
-    std::shared_ptr<CdsObject> createSingleItem(const fs::path& path, fs::path& rootPath, bool followSymlinks, bool checkDatabase, bool processExisting, const std::shared_ptr<CMAddFileTask>& task);
-    bool updateAttachedResources(const std::shared_ptr<AutoscanDirectory>& adir, const char* location, const std::string& parentPath, bool all);
-    void finishScan(DIR* dir, const std::shared_ptr<AutoscanDirectory>& adir, const std::string& location, time_t lmt);
+    void addRecursive(std::shared_ptr<AutoscanDirectory>& adir, const fs::directory_entry& subDir, bool followSymlinks, bool hidden, const std::shared_ptr<CMAddFileTask>& task);
+    std::shared_ptr<CdsObject> createSingleItem(const fs::directory_entry& dirEnt, fs::path& rootPath, bool followSymlinks, bool checkDatabase, bool processExisting, bool firstChild, const std::shared_ptr<CMAddFileTask>& task);
+    bool updateAttachedResources(const std::shared_ptr<AutoscanDirectory>& adir, const fs::path& location, const std::string& parentPath, bool all);
+    void finishScan(const std::shared_ptr<AutoscanDirectory>& adir, const fs::path& location, std::shared_ptr<CdsContainer>& parent, std::chrono::seconds lmt, const std::shared_ptr<CdsObject>& firstObject = nullptr);
     static void invalidateAddTask(const std::shared_ptr<GenericTask>& t, const fs::path& path);
 
-    void assignFanArt(const std::vector<int>& containerIds, const std::shared_ptr<CdsObject>& origObj);
+    void assignFanArt(const std::vector<std::shared_ptr<CdsContainer>>& containerList, const std::shared_ptr<CdsObject>& origObj);
 
     template <typename T>
     void updateCdsObject(std::shared_ptr<T>& item, const std::map<std::string, std::string>& parameters);
@@ -378,17 +375,14 @@ protected:
 
     bool layout_enabled;
 
-    void signal() { cond.notify_one(); }
     static void* staticThreadProc(void* arg);
     void threadProc();
 
     void addTask(const std::shared_ptr<GenericTask>& task, bool lowPriority = false);
 
-    pthread_t taskThread;
-    std::condition_variable_any cond;
+    std::unique_ptr<ThreadRunner<std::condition_variable_any, std::recursive_mutex>> threadRunner;
 
     bool working;
-
     bool shutdownFlag;
 
     std::deque<std::shared_ptr<GenericTask>> taskQueue1; // priority 1

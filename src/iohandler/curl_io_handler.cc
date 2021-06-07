@@ -35,8 +35,8 @@
 #include "config/config_manager.h"
 #include "util/tools.h"
 
-CurlIOHandler::CurlIOHandler(const std::string& URL, CURL* curl_handle, size_t bufSize, size_t initialFillSize)
-    : IOHandlerBufferHelper(bufSize, initialFillSize)
+CurlIOHandler::CurlIOHandler(std::shared_ptr<Config> config, const std::string& URL, CURL* curl_handle, size_t bufSize, size_t initialFillSize)
+    : IOHandlerBufferHelper(std::move(config), bufSize, initialFillSize)
 {
     if (URL.empty())
         throw_std_runtime_error("URL has not been set correctly");
@@ -102,9 +102,9 @@ void CurlIOHandler::threadProc()
     //proxy..
 
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, CurlIOHandler::curlCallback);
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void*)this);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, reinterpret_cast<void*>(this));
 
-    std::unique_lock<std::mutex> lock(mutex, std::defer_lock);
+    auto lock = threadRunner->uniqueLock(std::defer_lock);
     do {
         lock.lock();
         if (doSeek) {
@@ -125,7 +125,7 @@ void CurlIOHandler::threadProc()
             waitForInitialFillSize = (initialFillSize > 0);
 
             doSeek = false;
-            cond.notify_one();
+            threadRunner->notify();
         }
         lock.unlock();
         res = curl_easy_perform(curl_handle);
@@ -136,7 +136,7 @@ void CurlIOHandler::threadProc()
     else
         eof = true;
 
-    cond.notify_one();
+    threadRunner->notify();
 }
 
 size_t CurlIOHandler::curlCallback(void* ptr, size_t size, size_t nmemb, void* data)
@@ -145,21 +145,22 @@ size_t CurlIOHandler::curlCallback(void* ptr, size_t size, size_t nmemb, void* d
     size_t wantWrite = size * nmemb;
 
     assert(wantWrite <= ego->bufSize);
+    auto& threadRunner = ego->threadRunner;
 
     //log_debug("URL: {}; size: {}; nmemb: {}; wantWrite: {}", ego->URL.c_str(), size, nmemb, wantWrite);
 
-    std::unique_lock<std::mutex> lock(ego->mutex);
+    auto lock = threadRunner->uniqueLock();
 
     bool first = true;
 
     int bufFree = 0;
     do {
         if (ego->doSeek && !ego->empty && (ego->seekWhence == SEEK_SET || (ego->seekWhence == SEEK_CUR && ego->seekOffset > 0))) {
-            int currentFillSize = ego->b - ego->a;
+            auto currentFillSize = int(ego->b - ego->a);
             if (currentFillSize <= 0)
                 currentFillSize += ego->bufSize;
 
-            int relSeek = ego->seekOffset;
+            auto relSeek = int(ego->seekOffset);
             if (ego->seekWhence == SEEK_SET)
                 relSeek -= ego->posRead;
 
@@ -175,7 +176,7 @@ size_t CurlIOHandler::curlCallback(void* ptr, size_t size, size_t nmemb, void* d
                 /// \todo do we need to wait for initialFillSize again?
 
                 ego->doSeek = false;
-                ego->cond.notify_one();
+                threadRunner->notify();
             }
         }
 
@@ -192,7 +193,7 @@ size_t CurlIOHandler::curlCallback(void* ptr, size_t size, size_t nmemb, void* d
         }
 
         if (!first) {
-            ego->cond.wait(lock);
+            threadRunner->wait(lock);
         } else
             first = false;
 
@@ -229,16 +230,16 @@ size_t CurlIOHandler::curlCallback(void* ptr, size_t size, size_t nmemb, void* d
         ego->b -= ego->bufSize;
     if (ego->empty) {
         ego->empty = false;
-        ego->cond.notify_one();
+        threadRunner->notify();
     }
     if (ego->waitForInitialFillSize) {
-        int currentFillSize = ego->b - ego->a;
+        auto currentFillSize = int(ego->b - ego->a);
         if (currentFillSize <= 0)
             currentFillSize += ego->bufSize;
         if (size_t(currentFillSize) >= ego->initialFillSize) {
             log_debug("buffer: initial fillsize reached");
             ego->waitForInitialFillSize = false;
-            ego->cond.notify_one();
+            threadRunner->notify();
         }
     }
 

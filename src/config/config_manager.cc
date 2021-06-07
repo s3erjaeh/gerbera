@@ -48,10 +48,12 @@
 #endif
 
 #include "client_config.h"
+#include "config_definition.h"
 #include "config_options.h"
 #include "config_setup.h"
 #include "content/autoscan.h"
 #include "database/database.h"
+#include "metadata/metadata_handler.h"
 #include "transcoding/transcoding.h"
 #include "util/string_converter.h"
 #include "util/tools.h"
@@ -70,7 +72,7 @@ ConfigManager::ConfigManager(fs::path filename,
     , interface(std::move(interface))
     , port(port)
     , xmlDoc(std::make_unique<pugi::xml_document>())
-    , options(std::make_unique<std::vector<std::shared_ptr<ConfigOption>>>())
+    , options(std::make_unique<std::vector<std::shared_ptr<ConfigOption>>>(CFG_MAX))
 {
     ConfigManager::debug = debug;
 
@@ -314,7 +316,7 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
     std::make_shared<ConfigBoolSetup>(CFG_IMPORT_LAYOUT_PARENT_PATH,
         "/import/layout/attribute::parent-path", "config-import.html#layout",
         DEFAULT_IMPORT_LAYOUT_PARENT_PATH),
-#if defined(HAVE_JS) || defined(HAVE_PY)
+#ifdef HAVE_JS
     std::make_shared<ConfigStringSetup>(CFG_IMPORT_SCRIPTING_CHARSET,
         "/import/scripting/attribute::script-charset", "config-import.html#scripting",
         DEFAULT_JS_CHARSET),
@@ -346,7 +348,7 @@ const std::vector<std::shared_ptr<ConfigSetup>> ConfigManager::complexOptions = 
     std::make_shared<ConfigEnumSetup<std::string>>(CFG_IMPORT_SCRIPTING_VIRTUAL_LAYOUT_TYPE,
         "/import/scripting/virtual-layout/attribute::type", "config-import.html#scripting",
         DEFAULT_LAYOUT_TYPE,
-        std::map<std::string, std::string>({ { "py", "py" } ,{ "js", "js" }, { "builtin", "builtin" }, { "disabled", "disabled" } })),
+        std::map<std::string, std::string>({ { "js", "js" }, { "builtin", "builtin" }, { "disabled", "disabled" } })),
 
     std::make_shared<ConfigBoolSetup>(CFG_TRANSCODING_TRANSCODING_ENABLED,
         "/transcoding/attribute::enabled", "config-transcode.html#transcoding",
@@ -846,7 +848,7 @@ std::shared_ptr<ConfigSetup> ConfigManager::findConfigSetupByPath(const std::str
 
 std::shared_ptr<ConfigOption> ConfigManager::setOption(const pugi::xml_node& root, config_option_t option, const std::map<std::string, std::string>* arguments)
 {
-    auto co = findConfigSetup(option);
+    auto co = ConfigDefinition::findConfigSetup(option);
     auto self = getSelf();
     co->makeOption(root, self, arguments);
     log_debug("Config: option set: '{}'", co->xpath);
@@ -891,7 +893,7 @@ void ConfigManager::load(const fs::path& userHome)
 
     // now go through the mandatory parameters, if something is missing
     // we will not start the server
-    co = findConfigSetup(CFG_SERVER_HOME);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_HOME);
     if (!userHome.empty()) {
         // respect command line; ignore xml value
         temp = userHome;
@@ -904,6 +906,7 @@ void ConfigManager::load(const fs::path& userHome)
     co->makeOption(temp, self);
     ConfigPathSetup::Home = temp;
 
+    // read root options
     setOption(root, CFG_SERVER_WEBROOT);
     setOption(root, CFG_SERVER_TMPDIR);
     setOption(root, CFG_SERVER_SERVEDIR);
@@ -915,15 +918,16 @@ void ConfigManager::load(const fs::path& userHome)
     bool mysql_en = false;
     bool sqlite3_en = false;
 
-    co = findConfigSetup(CFG_SERVER_STORAGE);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_STORAGE);
     co->getXmlElement(root); // fails if missing
+    setOption(root, CFG_SERVER_STORAGE_USE_TRANSACTIONS);
 
-    co = findConfigSetup(CFG_SERVER_STORAGE_MYSQL);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_STORAGE_MYSQL);
     if (co->hasXmlElement(root)) {
         mysql_en = setOption(root, CFG_SERVER_STORAGE_MYSQL_ENABLED)->getBoolOption();
     }
 
-    co = findConfigSetup(CFG_SERVER_STORAGE_SQLITE);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_STORAGE_SQLITE);
     if (co->hasXmlElement(root)) {
         sqlite3_en = setOption(root, CFG_SERVER_STORAGE_SQLITE_ENABLED)->getBoolOption();
     }
@@ -937,6 +941,7 @@ void ConfigManager::load(const fs::path& userHome)
                                  "one database driver must be active");
 
 #ifdef HAVE_MYSQL
+    // read mysql options
     if (mysql_en) {
         setOption(root, CFG_SERVER_STORAGE_MYSQL_HOST);
         setOption(root, CFG_SERVER_STORAGE_MYSQL_DATABASE);
@@ -945,7 +950,7 @@ void ConfigManager::load(const fs::path& userHome)
         setOption(root, CFG_SERVER_STORAGE_MYSQL_SOCKET);
         setOption(root, CFG_SERVER_STORAGE_MYSQL_PASSWORD);
 
-        co = findConfigSetup(CFG_SERVER_STORAGE_MYSQL_INIT_SQL_FILE);
+        co = ConfigDefinition::findConfigSetup(CFG_SERVER_STORAGE_MYSQL_INIT_SQL_FILE);
         co->setDefaultValue(dataDir / "mysql.sql");
         co->makeOption(root, self);
     }
@@ -964,8 +969,9 @@ void ConfigManager::load(const fs::path& userHome)
         setOption(root, CFG_SERVER_STORAGE_SQLITE_BACKUP_ENABLED);
         setOption(root, CFG_SERVER_STORAGE_SQLITE_BACKUP_INTERVAL);
 
-        co = findConfigSetup(CFG_SERVER_STORAGE_SQLITE_INIT_SQL_FILE);
-        co->setDefaultValue(dataDir / "sqlite3.sql");
+        co = ConfigDefinition::findConfigSetup(CFG_SERVER_STORAGE_SQLITE_INIT_SQL_FILE);
+        fs::path dir = dataDir / "sqlite3.sql";
+        co->setDefaultValue(dir.string());
         co->makeOption(root, self);
     }
 
@@ -975,7 +981,7 @@ void ConfigManager::load(const fs::path& userHome)
     if (mysql_en)
         dbDriver = "mysql";
 
-    co = findConfigSetup(CFG_SERVER_STORAGE_DRIVER);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_STORAGE_DRIVER);
     co->makeOption(dbDriver, self);
 
     // now go through the optional settings and fix them if anything is missing
@@ -988,14 +994,21 @@ void ConfigManager::load(const fs::path& userHome)
 
     // now get the option list for the drop down menu
     auto menu_opts = setOption(root, CFG_SERVER_UI_ITEMS_PER_PAGE_DROPDOWN)->getArrayOption();
-    if (std::none_of(menu_opts.begin(), menu_opts.end(), [=](const auto& s) { return s == fmt::to_string(def_ipp); }))
+    if (std::find(menu_opts.begin(), menu_opts.end(), fmt::to_string(def_ipp)) == menu_opts.end())
         throw std::runtime_error("Error in config file: at least one <option> "
                                  "under <items-per-page> must match the "
                                  "<items-per-page default=\"\" /> attribute");
 
+    // read account options
     setOption(root, CFG_SERVER_UI_ACCOUNTS_ENABLED);
     setOption(root, CFG_SERVER_UI_ACCOUNT_LIST);
     setOption(root, CFG_SERVER_UI_SESSION_TIMEOUT);
+
+    // read upnp options
+    setOption(root, CFG_UPNP_ALBUM_PROPERTIES);
+    setOption(root, CFG_UPNP_ARTIST_PROPERTIES);
+    setOption(root, CFG_UPNP_TITLE_PROPERTIES);
+    setOption(root, CFG_THREAD_SCOPE_SYSTEM);
 
     bool cl_en = setOption(root, CFG_CLIENTS_LIST_ENABLED)->getBoolOption();
     args["isEnabled"] = cl_en ? "true" : "false";
@@ -1004,6 +1017,7 @@ void ConfigManager::load(const fs::path& userHome)
 
     setOption(root, CFG_IMPORT_HIDDEN_FILES);
     setOption(root, CFG_IMPORT_FOLLOW_SYMLINKS);
+    setOption(root, CFG_IMPORT_READABLE_NAMES);
     setOption(root, CFG_IMPORT_MAPPINGS_IGNORE_UNKNOWN_EXTENSIONS);
     bool csens = setOption(root, CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_CASE_SENSITIVE)->getBoolOption();
     args["tolower"] = fmt::to_string(!csens);
@@ -1025,7 +1039,7 @@ void ConfigManager::load(const fs::path& userHome)
     temp = DEFAULT_FILESYSTEM_CHARSET;
 #endif
     // check if the one we take as default is actually available
-    co = findConfigSetup(CFG_IMPORT_FILESYSTEM_CHARSET);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_FILESYSTEM_CHARSET);
     try {
         auto conv = std::make_unique<StringConverter>(temp,
             DEFAULT_INTERNAL_CHARSET);
@@ -1043,7 +1057,7 @@ void ConfigManager::load(const fs::path& userHome)
     log_debug("Setting filesystem import charset to {}", charset.c_str());
     co->makeOption(charset, self);
 
-    co = findConfigSetup(CFG_IMPORT_METADATA_CHARSET);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_METADATA_CHARSET);
     co->setDefaultValue(temp);
     charset = co->getXmlContent(root);
     try {
@@ -1054,7 +1068,7 @@ void ConfigManager::load(const fs::path& userHome)
     log_debug("Setting metadata import charset to {}", charset.c_str());
     co->makeOption(charset, self);
 
-    co = findConfigSetup(CFG_IMPORT_PLAYLIST_CHARSET);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_PLAYLIST_CHARSET);
     co->setDefaultValue(temp);
     charset = co->getXmlContent(root);
     try {
@@ -1067,7 +1081,7 @@ void ConfigManager::load(const fs::path& userHome)
 
     setOption(root, CFG_SERVER_HIDE_PC_DIRECTORY);
 
-    co = findConfigSetup(CFG_SERVER_NETWORK_INTERFACE);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_NETWORK_INTERFACE);
     if (interface.empty()) {
         temp = co->getXmlContent(root);
     } else {
@@ -1075,7 +1089,7 @@ void ConfigManager::load(const fs::path& userHome)
     }
     co->makeOption(temp, self);
 
-    co = findConfigSetup(CFG_SERVER_IP);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_IP);
     if (ip.empty()) {
         temp = co->getXmlContent(root); // bind to any IP address
     } else {
@@ -1086,6 +1100,7 @@ void ConfigManager::load(const fs::path& userHome)
     if (!getOption(CFG_SERVER_NETWORK_INTERFACE).empty() && !getOption(CFG_SERVER_IP).empty())
         throw std::runtime_error("Error in config file: you can not specify interface and ip at the same time");
 
+    // read server options
     setOption(root, CFG_SERVER_BOOKMARK_FILE);
     setOption(root, CFG_SERVER_NAME);
     setOption(root, CFG_SERVER_MODEL_NAME);
@@ -1101,9 +1116,10 @@ void ConfigManager::load(const fs::path& userHome)
 
     temp = setOption(root, CFG_SERVER_APPEND_PRESENTATION_URL_TO)->getOption();
     if (((temp == "ip") || (temp == "port")) && getOption(CFG_SERVER_PRESENTATION_URL).empty()) {
-        throw std::runtime_error("Error in config file: \"append-to\" attribute "
-                                 "value in <presentationURL> tag is set to \""
-            + temp + "\" but no URL is specified");
+        throw_std_runtime_error("Error in config file: \"append-to\" attribute "
+                                "value in <presentationURL> tag is set to \"{}\""
+                                "but no URL is specified",
+            temp.c_str());
     }
 
 #if defined(HAVE_JS) || defined(HAVE_PY)
@@ -1111,17 +1127,30 @@ void ConfigManager::load(const fs::path& userHome)
     co->setDefaultValue(dataDir / DEFAULT_JS_DIR / DEFAULT_PLAYLISTS_SCRIPT);
     co->makeOption(root, self);
 
-    co = findConfigSetup(CFG_IMPORT_SCRIPTING_COMMON_SCRIPT);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_SCRIPTING_COMMON_SCRIPT);
     co->setDefaultValue(dataDir / DEFAULT_JS_DIR / DEFAULT_COMMON_SCRIPT);
     co->makeOption(root, self);
 
-    co = findConfigSetup(CFG_IMPORT_SCRIPTING_CUSTOM_SCRIPT);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_SCRIPTING_CUSTOM_SCRIPT);
     args["resolveEmpty"] = "false";
     co->makeOption(root, self, &args);
     args.clear();
 
     setOption(root, CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT_LINK_OBJECTS);
+    setOption(root, CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT_OPTIONS);
+    setOption(root, CFG_IMPORT_SCRIPTING_IMPORT_LAYOUT_AUDIO);
+    setOption(root, CFG_IMPORT_SCRIPTING_IMPORT_LAYOUT_VIDEO);
+    setOption(root, CFG_IMPORT_SCRIPTING_IMPORT_LAYOUT_IMAGE);
+    setOption(root, CFG_IMPORT_SCRIPTING_IMPORT_LAYOUT_TRAILER);
+
+    setOption(root, CFG_IMPORT_SCRIPTING_STRUCTURED_LAYOUT_SKIPCHARS);
+    setOption(root, CFG_IMPORT_SCRIPTING_STRUCTURED_LAYOUT_ALBUMBOX);
+    setOption(root, CFG_IMPORT_SCRIPTING_STRUCTURED_LAYOUT_ARTISTBOX);
+    setOption(root, CFG_IMPORT_SCRIPTING_STRUCTURED_LAYOUT_GENREBOX);
+    setOption(root, CFG_IMPORT_SCRIPTING_STRUCTURED_LAYOUT_TRACKBOX);
+    setOption(root, CFG_IMPORT_SCRIPTING_STRUCTURED_LAYOUT_DIVCHAR);
 #endif
+    setOption(root, CFG_IMPORT_SCRIPTING_IMPORT_GENRE_MAP);
 
     auto layoutType = setOption(root, CFG_IMPORT_SCRIPTING_VIRTUAL_LAYOUT_TYPE)->getOption();
 
@@ -1148,7 +1177,7 @@ void ConfigManager::load(const fs::path& userHome)
         }
     }
 
-    co = findConfigSetup(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_SCRIPTING_IMPORT_SCRIPT);
     args["mustExist"] = fmt::to_string(layoutType == "js");
     args["notEmpty"] = fmt::to_string(layoutType == "js");
     co->setDefaultValue(dataDir / DEFAULT_JS_DIR / DEFAULT_IMPORT_SCRIPT);
@@ -1157,7 +1186,7 @@ void ConfigManager::load(const fs::path& userHome)
     auto script_path = co->getValue()->getOption();
 
 #endif
-    co = findConfigSetup(CFG_SERVER_PORT);
+    co = ConfigDefinition::findConfigSetup(CFG_SERVER_PORT);
     // 0 means, that the SDK will any free port itself
     co->makeOption((port == 0) ? co->getXmlContent(root) : fmt::to_string(port), self);
 
@@ -1170,8 +1199,12 @@ void ConfigManager::load(const fs::path& userHome)
     setOption(root, CFG_IMPORT_AUTOSCAN_TIMED_LIST, &args);
 
 #ifdef HAVE_INOTIFY
+    auto useInotify = setOption(root, CFG_IMPORT_AUTOSCAN_USE_INOTIFY)->getBoolOption();
+
     if (useInotify) {
         setOption(root, CFG_IMPORT_AUTOSCAN_INOTIFY_LIST, &args);
+    } else {
+        setOption({}, CFG_IMPORT_AUTOSCAN_INOTIFY_LIST); // set empty list
     }
 #endif
     args.clear();
@@ -1190,6 +1223,7 @@ void ConfigManager::load(const fs::path& userHome)
     }
 #endif //HAVE_CURL
 
+    // read import options
     setOption(root, CFG_IMPORT_RESOURCES_CASE_SENSITIVE);
     setOption(root, CFG_IMPORT_RESOURCES_FANART_FILE_LIST);
     setOption(root, CFG_IMPORT_RESOURCES_CONTAINERART_FILE_LIST);
@@ -1199,12 +1233,14 @@ void ConfigManager::load(const fs::path& userHome)
     setOption(root, CFG_IMPORT_RESOURCES_SUBTITLE_FILE_LIST);
     setOption(root, CFG_IMPORT_RESOURCES_RESOURCE_FILE_LIST);
     setOption(root, CFG_IMPORT_DIRECTORIES_LIST);
+    setOption(root, CFG_IMPORT_SYSTEM_DIRECTORIES);
 
     args["trim"] = "false";
     setOption(root, CFG_IMPORT_LIBOPTS_ENTRY_SEP, &args);
     setOption(root, CFG_IMPORT_LIBOPTS_ENTRY_LEGACY_SEP, &args);
     args.clear();
 
+    // read library options
 #ifdef HAVE_LIBEXIF
     setOption(root, CFG_IMPORT_LIBOPTS_EXIF_AUXDATA_TAGS_LIST);
     setOption(root, CFG_IMPORT_LIBOPTS_EXIF_CHARSET);
@@ -1256,7 +1292,7 @@ void ConfigManager::load(const fs::path& userHome)
 #endif
 
 #ifdef HAVE_MAGIC
-    co = findConfigSetup(CFG_IMPORT_MAGIC_FILE);
+    co = ConfigDefinition::findConfigSetup(CFG_IMPORT_MAGIC_FILE);
     args["isFile"] = "true";
     args["resolveEmpty"] = "false";
     co->makeOption(!magicFile.empty() ? magicFile.string() : co->getXmlContent(root), self, &args);
@@ -1277,6 +1313,7 @@ void ConfigManager::load(const fs::path& userHome)
     }
 #endif
 
+    // read online content options
 #ifdef SOPCAST
     setOption(root, CFG_ONLINE_CONTENT_SOPCAST_ENABLED);
 
@@ -1295,7 +1332,7 @@ void ConfigManager::load(const fs::path& userHome)
     setOption(root, CFG_ONLINE_CONTENT_ATRAILERS_ENABLED);
     int atrailers_refresh = setOption(root, CFG_ONLINE_CONTENT_ATRAILERS_REFRESH)->getIntOption();
 
-    co = findConfigSetup(CFG_ONLINE_CONTENT_ATRAILERS_PURGE_AFTER);
+    co = ConfigDefinition::findConfigSetup(CFG_ONLINE_CONTENT_ATRAILERS_PURGE_AFTER);
     co->makeOption(fmt::to_string(atrailers_refresh), self);
 
     setOption(root, CFG_ONLINE_CONTENT_ATRAILERS_UPDATE_AT_START);
@@ -1319,9 +1356,9 @@ void ConfigManager::updateConfigFromDatabase(std::shared_ptr<Database> database)
     origValues.clear();
     log_info("Loading {} configuration items from database", values.size());
 
-    for (const auto& cfgValue : values) {
+    for (auto&& cfgValue : values) {
         try {
-            auto cs = ConfigManager::findConfigSetupByPath(cfgValue.key, true);
+            auto cs = ConfigDefinition::findConfigSetupByPath(cfgValue.key, true);
 
             if (cs != nullptr) {
                 if (cfgValue.item == cs->xpath) {
@@ -1331,12 +1368,12 @@ void ConfigManager::updateConfigFromDatabase(std::shared_ptr<Database> database)
                     std::string parValue = cfgValue.value;
                     if (cfgValue.status == STATUS_CHANGED || cfgValue.status == STATUS_UNCHANGED) {
                         if (!cs->updateDetail(cfgValue.item, parValue, self)) {
-                            log_error("unhandled option {} != {}", cfgValue.item, cs->xpath);
+                            log_error("unhandled {} option {} != {}", cfgValue.status, cfgValue.item, cs->xpath);
                         }
                     } else if (cfgValue.status == STATUS_REMOVED || cfgValue.status == STATUS_ADDED || cfgValue.status == STATUS_MANUAL) {
                         std::map<std::string, std::string> arguments = { { "status", cfgValue.status } };
                         if (!cs->updateDetail(cfgValue.item, parValue, self, &arguments)) {
-                            log_error("unhandled option {} != {}", cfgValue.item, cs->xpath);
+                            log_error("unhandled {} option {} != {}", cfgValue.status, cfgValue.item, cs->xpath);
                         }
                     }
                 }

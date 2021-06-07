@@ -34,11 +34,11 @@
 
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
 #include <list>
 #include <memory>
 
 #include "common.h"
+#include "thread_runner.h"
 #include "tools.h"
 
 class Timer {
@@ -70,14 +70,21 @@ public:
 
     class Subscriber {
     public:
+        Subscriber() = default;
         virtual ~Subscriber() { log_debug("Subscriber destroyed"); }
         virtual void timerNotify(std::shared_ptr<Parameter> parameter) = 0;
+
+        Subscriber(const Subscriber&) = delete;
+        Subscriber& operator=(const Subscriber&) = delete;
     };
 
-    Timer();
-    void run();
-
+    explicit Timer(std::shared_ptr<Config> config);
     virtual ~Timer() { log_debug("Timer destroyed"); }
+
+    Timer(const Timer&) = delete;
+    Timer& operator=(const Timer&) = delete;
+
+    void run();
     void shutdown();
 
     /// \brief Add a subscriber
@@ -87,15 +94,14 @@ public:
     /// the same parameter argument, unless the subscription is for a one-shot
     /// timer and the subscriber has already been notified (and removed from the
     /// subscribers list).
-    void addTimerSubscriber(Subscriber* timerSubscriber, unsigned int notifyInterval, std::shared_ptr<Parameter> parameter = nullptr, bool once = false);
+    void addTimerSubscriber(Subscriber* timerSubscriber, std::chrono::seconds notifyInterval, std::shared_ptr<Parameter> parameter = nullptr, bool once = false);
     void removeTimerSubscriber(Subscriber* timerSubscriber, std::shared_ptr<Parameter> parameter = nullptr, bool dontFail = false);
     void triggerWait();
-    void signal() { cond.notify_one(); }
 
 protected:
     class TimerSubscriberElement {
     public:
-        TimerSubscriberElement(Subscriber* subscriber, unsigned int notifyInterval, std::shared_ptr<Parameter> parameter, bool once = false)
+        TimerSubscriberElement(Subscriber* subscriber, std::chrono::seconds notifyInterval, std::shared_ptr<Parameter> parameter, bool once = false)
             : subscriber(subscriber)
             , notifyInterval(notifyInterval)
             , parameter(std::move(parameter))
@@ -113,9 +119,9 @@ protected:
         }
         void updateNextNotify()
         {
-            getTimespecAfterMillis(notifyInterval * 1000, &nextNotify);
+            getTimespecAfterMillis(notifyInterval, nextNotify);
         }
-        struct timespec* getNextNotify() { return &nextNotify; }
+        std::chrono::milliseconds getNextNotify() { return nextNotify; }
 
         std::shared_ptr<Parameter> getParameter() const { return parameter; }
 
@@ -127,27 +133,24 @@ protected:
 
     protected:
         Subscriber* subscriber;
-        unsigned int notifyInterval;
+        std::chrono::milliseconds notifyInterval;
         std::shared_ptr<Parameter> parameter;
-        struct timespec nextNotify;
+        std::chrono::milliseconds nextNotify {};
         bool once;
     };
 
     std::mutex waitMutex;
-    std::condition_variable cond;
     std::list<TimerSubscriberElement> subscribers;
-    std::atomic_bool shutdownFlag;
+    std::atomic_bool shutdownFlag { false };
 
     void notify();
-    struct timespec* getNextNotifyTime();
+    std::chrono::milliseconds getNextNotifyTime();
 
 private:
     static void* staticThreadProc(void* arg);
     void threadProc();
-    pthread_t thread { 0 };
-
-    std::mutex mutex;
-    using AutoLock = std::lock_guard<decltype(mutex)>;
+    std::shared_ptr<Config> config;
+    std::unique_ptr<StdThreadRunner> threadRunner;
 };
 
 #endif // __TIMER_H__

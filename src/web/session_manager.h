@@ -57,16 +57,16 @@ public:
     /// The session is created with a given timeout, each access to the session updates the
     /// last_access value, if last access lies further back than the timeout - the session will
     /// be deleted (will time out)
-    explicit Session(long timeout);
+    explicit Session(std::chrono::seconds timeout);
 
     void put(const std::string& key, std::string value);
     std::string get(const std::string& key);
 
     /// \brief Returns the time of last access to the session.
-    /// \return pointer to a timespec
-    struct timespec* getLastAccessTime() { return &last_access; }
+    /// \return std::chrono::seconds
+    std::chrono::seconds getLastAccessTime() { return last_access; }
 
-    long getTimeout() const { return timeout; }
+    std::chrono::seconds getTimeout() const { return timeout; }
 
     /// \brief Returns the session identifier.
     std::string getID() const { return sessionID; }
@@ -80,7 +80,7 @@ public:
 
     void logOut() { loggedIn = false; }
 
-    void access() { getTimespecNow(&last_access); }
+    void access() { last_access = currentTime(); }
 
     /// \brief Returns the updateIDs, collected for the sessions,
     /// and flushes the database for the ids
@@ -98,26 +98,26 @@ protected:
 
     void containerChangedUI(const std::vector<int>& objectIDs);
 
-    std::recursive_mutex mutex;
-    using AutoLock = std::lock_guard<decltype(mutex)>;
+    std::recursive_mutex rmutex;
+    using AutoLockR = std::lock_guard<decltype(rmutex)>;
     std::map<std::string, std::string> dict;
 
     /// \brief True if the ui update id hash became to big and
     /// the UI shall update every container
-    bool updateAll;
+    bool updateAll { false };
 
     std::shared_ptr<std::unordered_set<int>> uiUpdateIDs;
 
     /// \brief maximum time the session can be idle (starting from last_access)
-    long timeout;
+    std::chrono::seconds timeout;
 
     /// \brief time of last access to the session, returned by getLastAccessTime()
-    struct timespec last_access;
+    std::chrono::seconds last_access {};
 
     /// \brief arbitrary but unique string representing the ID of the session (returned by getID())
     std::string sessionID;
 
-    bool loggedIn;
+    bool loggedIn { false };
 
     friend class SessionManager;
 };
@@ -143,9 +143,12 @@ public:
     SessionManager(const std::shared_ptr<Config>& config, std::shared_ptr<Timer> timer);
     ~SessionManager() override { log_debug("SessionManager destroyed"); }
 
+    SessionManager(const SessionManager&) = delete;
+    SessionManager& operator=(const SessionManager&) = delete;
+
     /// \brief Creates a Session with a given timeout.
     /// \param timeout Session timeout in milliseconds.
-    std::shared_ptr<Session> createSession(long timeout);
+    std::shared_ptr<Session> createSession(std::chrono::seconds timeout);
 
     /// \brief Returns the instance to a Session with a given sessionID
     /// \param ID of the Session.

@@ -3,7 +3,7 @@
 
   search_handler.h - this file is part of Gerbera.
 
-  Copyright (C) 2018 Gerbera Contributors
+  Copyright (C) 2018-2021 Gerbera Contributors
 
   Gerbera is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License version 2
@@ -28,10 +28,21 @@
 #ifndef __SEARCH_HANDLER_H__
 #define __SEARCH_HANDLER_H__
 
+#include <algorithm>
+#include <fmt/core.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#define UPNP_SEARCH_CLASS "upnp:class"
+#define UPNP_SEARCH_ID "@id"
+#define UPNP_SEARCH_REFID "@refID"
+#define UPNP_SEARCH_PARENTID "@parentID"
+#define UPNP_SEARCH_PATH "path"
+#define META_NAME "name"
+#define META_VALUE "value"
 
 class SearchParam;
 
@@ -75,10 +86,8 @@ protected:
 
 class SearchLexer {
 public:
-    explicit SearchLexer(const std::string& input)
-        : input(input)
-        , currentPos(0)
-        , inQuotes(false)
+    explicit SearchLexer(std::string input)
+        : input(std::move(input))
     {
     }
     virtual ~SearchLexer() = default;
@@ -87,17 +96,15 @@ public:
 
     SearchLexer& operator=(const SearchLexer&) = delete;
     SearchLexer(const SearchLexer&) = delete;
-    SearchLexer& operator=(const SearchLexer&&) = delete;
-    SearchLexer(const SearchLexer&&) = delete;
 
 protected:
     std::string nextStringToken(const std::string& input);
     static std::unique_ptr<SearchToken> makeToken(const std::string& tokenStr);
     std::string getQuotedValue(const std::string& input);
 
-    const std::string& input;
-    unsigned currentPos;
-    bool inQuotes;
+    std::string input;
+    unsigned currentPos {};
+    bool inQuotes {};
 };
 
 // NOTES
@@ -372,10 +379,25 @@ public:
         const std::string& lhs, const std::string& rhs) const = 0;
 
     virtual ~SQLEmitter() = default;
-    virtual char tableQuote() const = 0;
+};
+
+class ColumnMapper {
+public:
+    virtual ~ColumnMapper() = default;
+    virtual bool hasEntry(const std::string& tag) const = 0;
+    virtual std::string tableQuoted() const = 0;
+    virtual std::string mapQuoted(const std::string& tag) const = 0;
+    virtual std::string mapQuotedLower(const std::string& tag) const = 0;
 };
 
 class DefaultSQLEmitter : public SQLEmitter {
+public:
+    DefaultSQLEmitter(std::shared_ptr<ColumnMapper> colMapper, std::shared_ptr<ColumnMapper> metaMapper)
+        : colMapper(colMapper)
+        , metaMapper(metaMapper)
+    {
+    }
+
     std::string emitSQL(const ASTNode* node) const override;
     std::string emit(const ASTAsterisk* node) const override { return "*"; }
     std::string emit(const ASTParenthesis* node, const std::string& bracketedNode) const override;
@@ -389,7 +411,11 @@ class DefaultSQLEmitter : public SQLEmitter {
     std::string emit(const ASTAndOperator* node, const std::string& lhs, const std::string& rhs) const override;
     std::string emit(const ASTOrOperator* node, const std::string& lhs, const std::string& rhs) const override;
 
-    char tableQuote() const override { return '"'; }
+private:
+    std::shared_ptr<ColumnMapper> colMapper;
+    std::shared_ptr<ColumnMapper> metaMapper;
+
+    std::pair<std::string, std::string> getPropertyStatement(const std::string& property) const;
 };
 
 class SearchParser {
@@ -413,5 +439,76 @@ private:
     std::shared_ptr<SearchToken> currentToken;
     std::shared_ptr<SearchLexer> lexer;
     const SQLEmitter& sqlEmitter;
+};
+
+template <class En>
+class EnumColumnMapper : public ColumnMapper {
+public:
+    explicit EnumColumnMapper(const char tabQuoteBegin, const char tabQuoteEnd, std::string tableAlias, std::string tableName,
+        const std::vector<std::pair<std::string, En>>& keyMap, const std::map<En, std::pair<std::string, std::string>>& colMap)
+        : table_quote_begin(tabQuoteBegin)
+        , table_quote_end(tabQuoteEnd)
+        , tableAlias(std::move(tableAlias))
+        , tableName(std::move(tableName))
+        , keyMap(keyMap)
+        , colMap(colMap)
+    {
+    }
+    bool hasEntry(const std::string& tag) const override
+    {
+        return std::find_if(keyMap.begin(), keyMap.end(), [=](auto&& map) { return map.first == tag; }) != keyMap.end();
+    }
+    std::string mapQuoted(En tag) const
+    {
+        auto it = std::find_if(colMap.begin(), colMap.end(), [=](auto&& map) { return map.first == tag; });
+        if (it != colMap.end()) {
+            return fmt::format("{0}{1}{3}.{0}{2}{3}", table_quote_begin, colMap.at(tag).first, colMap.at(tag).second, table_quote_end);
+        }
+        return "";
+    }
+
+    std::string tableQuoted() const override
+    {
+        return fmt::format("{0}{1}{3} {0}{2}{3}", table_quote_begin, tableName, tableAlias, table_quote_end);
+    }
+
+    std::string mapQuoted(const std::string& tag) const override
+    {
+        auto it = std::find_if(keyMap.begin(), keyMap.end(), [=](auto&& map) { return map.first == tag; });
+        if (it != keyMap.end()) {
+            return fmt::format("{0}{1}{3}.{0}{2}{3}", table_quote_begin, colMap.at(it->second).first, colMap.at(it->second).second, table_quote_end);
+        }
+        return "";
+    }
+    std::string mapQuotedLower(const std::string& tag) const override
+    {
+        auto it = std::find_if(keyMap.begin(), keyMap.end(), [=](auto&& map) { return map.first == tag; });
+        if (it != keyMap.end()) {
+            return fmt::format("LOWER({0}{1}{3}.{0}{2}{3})", table_quote_begin, colMap.at(it->second).first, colMap.at(it->second).second, table_quote_end);
+        }
+        return "";
+    }
+
+private:
+    const char table_quote_begin;
+    const char table_quote_end;
+    std::string tableAlias;
+    std::string tableName;
+    const std::vector<std::pair<std::string, En>>& keyMap;
+    const std::map<En, std::pair<std::string, std::string>>& colMap;
+};
+
+class SortParser {
+public:
+    SortParser(std::shared_ptr<ColumnMapper> colMapper, const std::string& sortCriteria)
+        : colMapper(std::move(colMapper))
+        , sortCrit(sortCriteria)
+    {
+    }
+    std::string parse();
+
+private:
+    std::shared_ptr<ColumnMapper> colMapper;
+    std::string sortCrit;
 };
 #endif // __SEARCH_HANDLER_H__

@@ -102,17 +102,12 @@ std::vector<std::string> splitString(const std::string& str, char sep, bool empt
 
 void leftTrimStringInPlace(std::string& str)
 {
-    str.erase(str.begin(), std::find_if(str.begin(), str.end(), [](int ch) {
-        return !std::isspace(ch);
-    }));
+    str.erase(str.begin(), std::find_if_not(str.begin(), str.end(), ::isspace));
 }
 
 void rightTrimStringInPlace(std::string& str)
 {
-    str.erase(std::find_if(str.rbegin(), str.rend(), [](int ch) {
-        return !std::isspace(ch);
-    }).base(),
-        str.end());
+    str.erase(std::find_if_not(str.rbegin(), str.rend(), ::isspace).base(), str.end());
 }
 
 void trimStringInPlace(std::string& str)
@@ -149,6 +144,13 @@ int stoiString(const std::string& str, int def, int base)
 
     return std::stoi(str, nullptr, base);
 }
+unsigned long stoulString(const std::string& str, int def, int base)
+{
+    if (str.empty() || !std::isdigit(*str.c_str()))
+        return def;
+
+    return std::stoul(str, nullptr, base);
+}
 
 std::string reduceString(std::string str, char ch)
 {
@@ -168,35 +170,14 @@ std::string& replaceString(std::string& str, std::string_view from, const std::s
     return str;
 }
 
-time_t getLastWriteTime(const fs::path& path)
+std::string& replaceAllString(std::string& str, std::string_view from, const std::string& to)
 {
-    // in future with C+20 we can replace this function too:
-    // auto ftime = fs::last_write_time(p);
-    // time_t cftime = decltype(ftime)::clock::to_time_t(ftime);
-
-    struct stat statbuf;
-    int ret = stat(path.c_str(), &statbuf);
-    if (ret != 0) {
-        throw_std_runtime_error("{}: {}", std::strerror(errno), path.c_str());
+    size_t start_pos = str.find(from);
+    while (start_pos != std::string::npos) {
+        str.replace(start_pos, from.length(), to);
+        start_pos = str.find(from, start_pos + to.length());
     }
-
-    return statbuf.st_mtime;
-}
-
-bool isRegularFile(const fs::path& path)
-{
-    // unfortunately fs::is_regular_file(path) is broken with old libstdc++ on 32bit systems (see #737)
-#if defined(__GLIBCXX__) && (__GLIBCXX__ <= 20190406)
-    struct stat statbuf;
-    int ret = stat(path.c_str(), &statbuf);
-    if (ret != 0) {
-        throw_std_runtime_error("{}: {}", std::strerror(errno), path.c_str());
-    }
-
-    return S_ISREG(statbuf.st_mode);
-#else
-    return fs::is_regular_file(path);
-#endif
+    return str;
 }
 
 bool isRegularFile(const fs::path& path, std::error_code& ec) noexcept
@@ -217,19 +198,37 @@ bool isRegularFile(const fs::path& path, std::error_code& ec) noexcept
 #endif
 }
 
-off_t getFileSize(const fs::path& path)
+bool isRegularFile(const fs::directory_entry& dirEnt, std::error_code& ec) noexcept
 {
-    // unfortunately fs::file_size(path) is broken with old libstdc++ on 32bit systems (see #737)
+    // unfortunately fs::is_regular_file(path, ec) is broken with old libstdc++ on 32bit systems (see #737)
 #if defined(__GLIBCXX__) && (__GLIBCXX__ <= 20190406)
     struct stat statbuf;
-    int ret = stat(path.c_str(), &statbuf);
+    int ret = stat(dirEnt.path().c_str(), &statbuf);
     if (ret != 0) {
-        throw_std_runtime_error("{}: {}", std::strerror(errno), path.c_str());
+        ec = std::make_error_code(std::errc(errno));
+        return false;
+    }
+
+    ec.clear();
+    return S_ISREG(statbuf.st_mode);
+#else
+    return dirEnt.is_regular_file(ec);
+#endif
+}
+
+off_t getFileSize(const fs::directory_entry& dirEnt)
+{
+    // unfortunately fs::file_size() is broken with old libstdc++ on 32bit systems (see #737)
+#if defined(__GLIBCXX__) && (__GLIBCXX__ <= 20190406)
+    struct stat statbuf;
+    int ret = stat(dirEnt.path().c_str(), &statbuf);
+    if (ret != 0) {
+        throw_std_runtime_error("{}: {}", std::strerror(errno), dirEnt.path().c_str());
     }
 
     return statbuf.st_size;
 #else
-    return fs::file_size(path);
+    return dirEnt.file_size();
 #endif
 }
 
@@ -250,7 +249,7 @@ fs::path findInPath(const fs::path& exec)
 
     std::error_code ec;
     auto pathAr = splitString(PATH, ':');
-    for (auto& path : pathAr) {
+    for (auto&& path : pathAr) {
         fs::path check = fs::path(path) / exec;
         if (isRegularFile(check, ec))
             return check;
@@ -273,7 +272,7 @@ std::string renderWebUri(const std::string& ip, int port)
 
 std::string httpRedirectTo(const std::string& addr, const std::string& page)
 {
-    return R"(<html><head><meta http-equiv="Refresh" content="0;URL=http://)" + addr + "/" + page + R"("></head><body bgcolor="#dddddd"></body></html>)";
+    return fmt::format(R"(<html><head><meta http-equiv="Refresh" content="0;URL={}/{}"></head><body bgcolor="#dddddd"></body></html>)", addr, page);
 }
 
 std::string hexEncode(const void* data, int len)
@@ -443,7 +442,7 @@ std::string dictEncodeSimple(const std::map<std::string, std::string>& dict)
     return dictEncode(dict, '/', '/');
 }
 
-void dictDecode(const std::string& url, std::map<std::string, std::string>* dict)
+void dictDecode(const std::string& url, std::map<std::string, std::string>* dict, bool unEscape)
 {
     auto data = url.c_str();
     auto dataEnd = data + url.length();
@@ -456,8 +455,10 @@ void dictDecode(const std::string& url, std::map<std::string, std::string>* dict
         if (eqPos && eqPos < ampPos) {
             std::string key(data, eqPos - data);
             std::string value(eqPos + 1, ampPos - eqPos - 1);
-            key = urlUnescape(key);
-            value = urlUnescape(value);
+            if (unEscape) {
+                key = urlUnescape(key);
+                value = urlUnescape(value);
+            }
 
             dict->insert(std::pair(key, value));
         }
@@ -494,7 +495,7 @@ void dictDecodeSimple(const std::string& url, std::map<std::string, std::string>
 std::string mimeTypesToCsv(const std::vector<std::string>& mimeTypes)
 {
     std::ostringstream buf;
-    for (const auto& mimeType : mimeTypes) {
+    for (auto&& mimeType : mimeTypes) {
         buf << "http-get:*:" << mimeType << ":*"
             << ",";
     }
@@ -548,7 +549,7 @@ std::optional<std::vector<std::byte>> readBinaryFile(const fs::path& path)
 
     std::ifstream file { path, std::ios::in | std::ios::binary };
     if (!file)
-        return {};
+        return std::nullopt;
 
     auto& fb = *file.rdbuf();
 
@@ -569,7 +570,7 @@ std::optional<std::vector<std::byte>> readBinaryFile(const fs::path& path)
 
     result.resize(size);
 
-    return result;
+    return std::move(result);
 }
 
 void writeBinaryFile(const fs::path& path, const std::byte* data, std::size_t size)
@@ -702,7 +703,7 @@ std::string escape(std::string string, char escape_char, char to_escape)
 
         if (next == std::string::npos)
             next = len;
-        int cpLen = next - last;
+        auto cpLen = int(next - last);
         if (cpLen > 0) {
             buf.write(&string[last], cpLen);
         }
@@ -764,40 +765,31 @@ std::string toCSV(const std::shared_ptr<std::unordered_set<int>>& array)
     return array->empty() ? "" : join(*array, ",");
 }
 
-void getTimespecNow(struct timespec* ts)
+std::chrono::seconds currentTime()
 {
-    if (clock_gettime(CLOCK_REALTIME, ts) != 0)
-        throw_std_runtime_error("clock_gettime failed: {}", std::strerror(errno));
+    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
 }
 
-long getDeltaMillis(struct timespec* first)
+std::chrono::milliseconds currentTimeMS()
 {
-    struct timespec now;
-    getTimespecNow(&now);
-    return getDeltaMillis(first, &now);
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
 }
 
-long getDeltaMillis(struct timespec* first, struct timespec* second)
+std::chrono::milliseconds getDeltaMillis(std::chrono::milliseconds ms)
 {
-    return (second->tv_sec - first->tv_sec) * 1000 + (second->tv_nsec - first->tv_nsec) / 1000000;
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+    return now - ms;
 }
 
-void getTimespecAfterMillis(long delta, struct timespec* ret, struct timespec* start)
+std::chrono::milliseconds getDeltaMillis(std::chrono::milliseconds first, std::chrono::milliseconds second)
 {
-    struct timespec now;
-    if (start == nullptr) {
-        getTimespecNow(&now);
-        start = &now;
-    }
-    ret->tv_sec = start->tv_sec + delta / 1000;
-    ret->tv_nsec = (start->tv_nsec + (delta % 1000) * 1000000);
-    if (ret->tv_nsec >= 1000000000) // >= 1 second
-    {
-        ret->tv_sec++;
-        ret->tv_nsec -= 1000000000;
-    }
+    return second - first;
+}
 
-    // log_debug("timespec: sec: {}, nsec: {}", ret->tv_sec, ret->tv_nsec);
+void getTimespecAfterMillis(std::chrono::milliseconds delta, std::chrono::milliseconds& ret)
+{
+    auto start = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+    ret = start + delta;
 }
 
 std::string ipToInterface(const std::string& ip)
@@ -806,7 +798,8 @@ std::string ipToInterface(const std::string& ip)
         return "";
     }
 
-    log_debug("Looking for '{}'", ip.c_str());
+    log_warning("Please provide an interface name instead! LibUPnP does not support specifying an IP in current versions.");
+    log_info("Attempting to map {} to an interface", ip);
 
     struct ifaddrs *ifaddr, *ifa;
     int family, s, n;
@@ -861,7 +854,7 @@ std::vector<std::string> populateCommandLine(const std::string& line,
     if (in.empty() && out.empty())
         return params;
 
-    for (auto& param : params) {
+    for (auto&& param : params) {
         size_t inPos = param.find("%in");
         if (inPos != std::string::npos) {
             std::string newParam = param.replace(inPos, 3, in);
@@ -1067,11 +1060,9 @@ std::string getDLNAprofileString(const std::string& contentType)
         profile = UPNP_DLNA_PROFILE_MP3;
     else if (contentType == CONTENT_TYPE_PCM)
         profile = UPNP_DLNA_PROFILE_LPCM;
-    else
-        profile = "";
 
     if (!profile.empty())
-        profile = std::string(UPNP_DLNA_PROFILE) + "=" + profile;
+        profile = fmt::format("{}={}", UPNP_DLNA_PROFILE, profile);
     return profile;
 }
 
@@ -1226,7 +1217,7 @@ int find_local_port(in_port_t range_min, in_port_t range_max)
 
         retry_count++;
 
-    } while (retry_count < USHRT_MAX);
+    } while (retry_count < std::numeric_limits<uint16_t>::max());
 
     log_error("Could not find free port on localhost");
 

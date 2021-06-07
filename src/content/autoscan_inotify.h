@@ -54,6 +54,9 @@ public:
     explicit AutoscanInotify(std::shared_ptr<ContentManager> content);
     ~AutoscanInotify();
 
+    AutoscanInotify(const AutoscanInotify&) = delete;
+    AutoscanInotify& operator=(const AutoscanInotify&) = delete;
+
     void run();
 
     /// \brief Start monitoring a directory
@@ -103,9 +106,9 @@ private:
     public:
         WatchAutoscan(bool startPoint, std::shared_ptr<AutoscanDirectory> adir)
             : Watch(WatchType::Autoscan)
+            , adir(std::move(adir))
+            , startPoint(startPoint)
         {
-            this->adir = std::move(adir);
-            this->startPoint = startPoint;
         }
         std::shared_ptr<AutoscanDirectory> getAutoscanDirectory() const { return adir; }
         bool isStartPoint() const { return startPoint; }
@@ -128,8 +131,8 @@ private:
     public:
         explicit WatchMove(int removeWd)
             : Watch(WatchType::Move)
+            , removeWd(removeWd)
         {
-            this->removeWd = removeWd;
         }
         int getRemoveWd() const { return removeWd; }
 
@@ -141,10 +144,10 @@ private:
     public:
         Wd(fs::path path, int wd, int parentWd)
             : wdWatches(std::make_shared<std::vector<std::shared_ptr<Watch>>>())
+            , path(std::move(path))
+            , parentWd(parentWd)
+            , wd(wd)
         {
-            this->path = std::move(path);
-            this->wd = wd;
-            this->parentWd = parentWd;
         }
         fs::path getPath() const { return path; }
         int getWd() const { return wd; }
@@ -163,7 +166,7 @@ private:
 
     std::unique_ptr<std::unordered_map<int, std::shared_ptr<Wd>>> watches;
 
-    void monitorUnmonitorRecursive(const fs::path& startPath, bool unmonitor, const std::shared_ptr<AutoscanDirectory>& adir, bool startPoint);
+    void monitorUnmonitorRecursive(const fs::directory_entry& startPath, bool unmonitor, const std::shared_ptr<AutoscanDirectory>& adir, bool startPoint, bool followSymlinks);
     int monitorDirectory(const fs::path& path, const std::shared_ptr<AutoscanDirectory>& adir, bool startPoint, const std::vector<std::string>* pathArray = nullptr);
     void unmonitorDirectory(const fs::path& path, const std::shared_ptr<AutoscanDirectory>& adir);
 

@@ -343,14 +343,15 @@ Configuration
 -------------
 
 The configuration from `config.xml` and values changed via web UI are available in the global dictionary `config`. The key in the dictionary
-is the xpath as shown in brackets in the web UI. Array items can be accessed via index, Dictionaries with the key. Complex entries like autoscan
-and transcoding are not available. Example:
+is the xpath as shown in brackets in the web UI. Array items can be accessed via index, Dictionaries with the key. Complex entries like
+transcoding are not available. The autoscan entry corresponding to the active object is stored in `object_autoscan_id`. Examples:
 
     .. code-block:: js
 
         print(config['/server/name']);
         print(config['/import/library-options/id3/auxdata/add-data'][0]);
         print(config['/import/layout/path']['Directories']);
+        print(config['/import/autoscan/directory'][object_autoscan_id].location);
 
 
 Constants
@@ -546,6 +547,68 @@ They can be used by the import and by the playlist script.
             return path;
         }
 
+.. js:function:: mapGenre(genre)
+
+    Map value of the genre in virtual layout
+
+    :param string: Source value of the genre
+    :returns: string - Modified value of the genre
+
+    .. code-block:: js
+
+        function mapGenre(genre) {
+            const genreConfig = config['/import/scripting/virtual-layout/genre-map/genre'];
+            if (genreConfig) {
+                const genreNames = Object.getOwnPropertyNames(genreConfig);
+                for (var idx = 0; idx < genreNames.length; idx++) {
+                    var re = new RegExp('(' + genreNames[idx] + ')', 'i');
+                    var match = re.exec(genre);
+                    if (match) {
+                        genre = genreConfig[genreNames[idx]];
+                        break;
+                    }
+                }
+            }
+            return genre;
+        }
+
+.. js:function:: mapInitial(firstChar)
+
+    Map character to uppercase latin version
+
+    :param string: Source character
+    :returns: string - Modified value of the character
+
+    .. literalinclude:: ../scripts/js/common.js
+        :start-after: // doc-map-initial-begin
+        :end-before: // doc-map-initial-end
+        :language: js
+
+.. js:function:: intFromConfig(entry, defValue)
+
+    Read integer config value or use default
+
+    :param string entry: Config Entry
+    :param int defValue: Config Entry
+    :returns: int - value from config or default
+
+    .. literalinclude:: ../scripts/js/common.js
+        :start-after: // doc-map-int-config-begin
+        :end-before: // doc-map-int-config-end
+        :language: js
+
+.. js:function:: stringFromConfig(entry, defValue)
+
+    Read string config value or use default
+
+    :param string entry: Config Entry
+    :param string defValue: Config Entry
+    :returns: string - value from config or default
+
+    .. literalinclude:: ../scripts/js/common.js
+        :start-after: // doc-map-string-config-begin
+        :end-before: // doc-map-string-config-end
+        :language: js
 
 .. js:function:: getYear(date)
 

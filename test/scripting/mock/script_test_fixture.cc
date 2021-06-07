@@ -128,30 +128,36 @@ duk_ret_t ScriptTestFixture::dukMockPlaylist(duk_context* ctx, string title, str
     return 0;
 }
 
-void ScriptTestFixture::addGlobalFunctions(duk_context* ctx, const duk_function_list_entry* funcs)
+void ScriptTestFixture::addGlobalFunctions(duk_context* ctx, const duk_function_list_entry* funcs, const std::map<std::string_view, std::string_view>& config)
 {
-    for (const auto& entry : mt_keys) {
+    for (auto&& entry : mt_keys) {
         duk_push_string(ctx, entry.second);
-        auto sym = std::find_if(mt_names.begin(), mt_names.end(), [=](const auto& n) { return n.first == entry.first; });
+        auto sym = std::find_if(mt_names.begin(), mt_names.end(), [=](auto&& n) { return n.first == entry.first; });
         if (sym != mt_names.end())
             duk_put_global_string(ctx, sym->second);
     }
 
-    for (const auto& entry : res_keys) {
+    for (auto&& entry : res_keys) {
         duk_push_string(ctx, entry.second);
-        auto sym = std::find_if(res_names.begin(), res_names.end(), [=](const auto& n) { return n.first == entry.first; });
+        auto sym = std::find_if(res_names.begin(), res_names.end(), [=](auto&& n) { return n.first == entry.first; });
         if (sym != res_names.end())
             duk_put_global_string(ctx, sym->second);
     }
 
-    for (const auto& [field, sym] : ot_names) {
+    for (auto&& [field, sym] : ot_names) {
         duk_push_int(ctx, field);
         duk_put_global_string(ctx, sym);
     }
 
-    for (const auto& [field, sym] : upnp_classes) {
+    for (auto&& [field, sym] : upnp_classes) {
         duk_push_string(ctx, field);
         duk_put_global_string(ctx, sym);
+    }
+
+    if (config.empty()) {
+        addConfig(ctx, { { "/import/scripting/virtual-layout/attribute::audio-layout",  audioLayout }, { "/import/scripting/virtual-layout/structured-layout/attribute::skip-chars", "" } } );
+    } else {
+        addConfig(ctx, config);
     }
 
     duk_push_int(ctx, 0);
@@ -168,6 +174,16 @@ void ScriptTestFixture::addGlobalFunctions(duk_context* ctx, const duk_function_
     duk_push_global_object(ctx);
     duk_put_function_list(ctx, -1, funcs);
     duk_pop(ctx);
+}
+
+void ScriptTestFixture::addConfig(duk_context* ctx, const std::map<std::string_view, std::string_view>& config)
+{
+    duk_push_object(ctx); // config
+    for (auto&& [key, value] : config) {
+      duk_push_string(ctx, value.data());
+      duk_put_prop_string(ctx, -2, key.data());
+    }
+    duk_put_global_string(ctx, "config");
 }
 
 void ScriptTestFixture::executeScript(duk_context* ctx)
@@ -315,7 +331,7 @@ abcBoxParams ScriptTestFixture::abcBox(duk_context* ctx)
     params.boxType = boxType;
     params.divChar = divChar;
 
-    duk_push_string(ctx, "-ABCD-");
+    duk_push_string(ctx, boxType == 26 ? "-A-" : "-ABCD-");
     return params;
 }
 

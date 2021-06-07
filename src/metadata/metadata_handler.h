@@ -33,6 +33,8 @@
 #define __METADATA_HANDLER_H__
 
 #include <array>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #include "common.h"
 #include "context.h"
@@ -91,6 +93,7 @@ enum metadata_fields_t {
     M_ARTIST,
     M_ALBUM,
     M_DATE,
+    M_CREATION_DATE,
     M_UPNP_DATE,
     M_GENRE,
     M_DESCRIPTION,
@@ -116,11 +119,12 @@ enum metadata_fields_t {
     M_MAX
 };
 
-constexpr std::array<std::pair<metadata_fields_t, const char*>, M_MAX> mt_keys = { {
+static constexpr auto mt_keys = std::array<std::pair<metadata_fields_t, const char*>, M_MAX> { {
     { M_TITLE, "dc:title" },
     { M_ARTIST, "upnp:artist" },
     { M_ALBUM, "upnp:album" },
     { M_DATE, "dc:date" },
+    { M_CREATION_DATE, "dc:created" },
     { M_UPNP_DATE, "upnp:date" },
     { M_GENRE, "upnp:genre" },
     { M_DESCRIPTION, "dc:description" },
@@ -159,7 +163,7 @@ enum resource_attributes_t {
     R_MAX
 };
 
-constexpr std::array<std::pair<resource_attributes_t, const char*>, R_MAX> res_keys = { {
+static constexpr auto res_keys = std::array<std::pair<resource_attributes_t, const char*>, R_MAX> { {
     { R_SIZE, "size" },
     { R_DURATION, "duration" },
     { R_BITRATE, "bitrate" },
@@ -187,7 +191,7 @@ public:
 
     explicit MetadataHandler(const std::shared_ptr<Context>& context);
 
-    static void setMetadata(const std::shared_ptr<Context>& context, const std::shared_ptr<CdsItem>& item);
+    static void setMetadata(const std::shared_ptr<Context>& context, const std::shared_ptr<CdsItem>& item, const fs::directory_entry& dirEnt);
     static std::string getMetaFieldName(metadata_fields_t field);
     static std::string getResAttrName(resource_attributes_t attr);
     static std::unique_ptr<MetadataHandler> createHandler(const std::shared_ptr<Context>& context, int handlerType);

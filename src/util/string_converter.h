@@ -42,6 +42,9 @@ class StringConverter {
 public:
     StringConverter(const std::string& from, const std::string& to);
     virtual ~StringConverter();
+
+    StringConverter(const StringConverter&) = delete;
+    StringConverter& operator=(const StringConverter&) = delete;
     /// \brief Converts uses the from and to values that were passed
     /// to the constructor to convert the string str to a specific character
     /// set.
@@ -76,7 +79,7 @@ public:
 
 protected:
     iconv_t cd;
-    bool dirty;
+    bool dirty { false };
 
     std::string _convert(const std::string& str, bool validate,
         size_t* stoppedAt = nullptr);

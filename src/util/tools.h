@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -74,25 +75,24 @@ bool startswith(const std::string& str, const std::string& check);
 /// \brief returns lowercase of str
 std::string toLower(std::string str);
 
+/// \brief convert string to integer
 int stoiString(const std::string& str, int def = 0, int base = 10);
+/// \brief convert string to unsigned long
+unsigned long stoulString(const std::string& str, int def = 0, int base = 10);
 
 /// \brief  Used to replace potential multiple following //../ with single /
 std::string reduceString(std::string str, char ch);
 
 /// \brief  Used to replace parts of string with other value
 std::string& replaceString(std::string& str, std::string_view from, const std::string& to);
-
-/// \brief Get last write time of the specified file or path, if it does not exist it will throw an exception
-/// \param path file or directory to be checked.
-/// \return last modification time of the path or directory
-time_t getLastWriteTime(const fs::path& path);
+std::string& replaceAllString(std::string& str, std::string_view from, const std::string& to);
 
 /// \brief Checks if the given file is a regular file (imitate same behaviour as std::filesystem::is_regular_file)
-bool isRegularFile(const fs::path& path);
 bool isRegularFile(const fs::path& path, std::error_code& ec) noexcept;
+bool isRegularFile(const fs::directory_entry& dirEnt, std::error_code& ec) noexcept;
 
 /// \brief Returns file size of give file, if it does not exist it will throw an exception
-off_t getFileSize(const fs::path& path);
+off_t getFileSize(const fs::directory_entry& dirEnt);
 
 /// \brief Checks if the given binary is executable by our process
 /// \param path absolute path of the binary
@@ -146,7 +146,7 @@ std::string urlUnescape(const std::string& str);
 
 std::string dictEncode(const std::map<std::string, std::string>& dict);
 std::string dictEncodeSimple(const std::map<std::string, std::string>& dict);
-void dictDecode(const std::string& url, std::map<std::string, std::string>* dict);
+void dictDecode(const std::string& url, std::map<std::string, std::string>* dict, bool unEscape = true);
 void dictDecodeSimple(const std::string& url, std::map<std::string, std::string>* dict);
 
 /// \brief Convert an array of strings to a CSV list, with additional protocol information
@@ -249,12 +249,13 @@ std::string getValueOrDefault(const std::map<std::string, std::string>& m, const
 
 std::string toCSV(const std::shared_ptr<std::unordered_set<int>>& array);
 
-void getTimespecNow(struct timespec* ts);
+std::chrono::seconds currentTime();
+std::chrono::milliseconds currentTimeMS();
 
-long getDeltaMillis(struct timespec* first);
-long getDeltaMillis(struct timespec* first, struct timespec* second);
+std::chrono::milliseconds getDeltaMillis(std::chrono::milliseconds ms);
+std::chrono::milliseconds getDeltaMillis(std::chrono::milliseconds first, std::chrono::milliseconds second);
 
-void getTimespecAfterMillis(long delta, struct timespec* ret, struct timespec* start = nullptr);
+void getTimespecAfterMillis(std::chrono::milliseconds delta, std::chrono::milliseconds& ret);
 
 /// \brief Finds the Interface with the specified IP address.
 /// \param ip i.e. 192.168.4.56.

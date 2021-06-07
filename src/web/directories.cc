@@ -40,21 +40,14 @@ web::directories::directories(std::shared_ptr<ContentManager> content)
 {
 }
 
-struct dirInfo {
-    std::string filename;
-    bool hasContent;
-};
+using dirInfo = std::pair<fs::path, bool>;
 
 void web::directories::process()
 {
     check_request();
 
-    fs::path path;
     std::string parentID = param("parent_id");
-    if (parentID.empty() || parentID == "0")
-        path = FS_ROOT_DIRECTORY;
-    else
-        path = hexDecodeString(parentID);
+    auto path = fs::path { (parentID.empty() || parentID == "0") ? FS_ROOT_DIRECTORY : hexDecodeString(parentID) };
 
     auto root = xmlDoc->document_element();
 
@@ -67,23 +60,7 @@ void web::directories::process()
     containers.append_attribute("type") = "filesystem";
 
     // don't bother users with system directorties
-    constexpr auto excludes_fullpath = std::array {
-        "/bin",
-        "/boot",
-        "/dev",
-        "/etc",
-        "/lib",
-        "/lib32",
-        "/lib64",
-        "/libx32",
-        "/proc",
-        "/run",
-        "/sbin",
-        "/sys",
-        "/tmp",
-        "/usr",
-        "/var",
-    };
+    auto&& excludes_fullpath = config->getArrayOption(CFG_IMPORT_SYSTEM_DIRECTORIES);
     // don't bother users with special or config directorties
     constexpr auto excludes_dirname = std::array {
         "lost+found",
@@ -91,9 +68,9 @@ void web::directories::process()
     bool exclude_config_dirs = true;
 
     std::error_code ec;
-    std::map<std::string, struct dirInfo> filesMap;
+    std::map<std::string, dirInfo> filesMap;
 
-    for (const auto& it : fs::directory_iterator(path, ec)) {
+    for (auto&& it : fs::directory_iterator(path, ec)) {
         const fs::path& filepath = it.path();
 
         if (!it.is_directory(ec))
@@ -104,13 +81,8 @@ void web::directories::process()
             || (exclude_config_dirs && startswith(filepath.filename(), ".")))
             continue;
 
-        bool hasContent = false;
-        for (auto& subIt : fs::directory_iterator(filepath, ec)) {
-            if (!subIt.is_directory(ec) && !isRegularFile(subIt.path(), ec))
-                continue;
-            hasContent = true;
-            break;
-        }
+        auto&& dir = fs::directory_iterator(filepath, ec);
+        bool hasContent = std::any_of(begin(dir), end(dir), [&](auto&& sub) { return sub.is_directory(ec) || isRegularFile(sub, ec); });
 
         /// \todo replace hexEncode with base64_encode?
         std::string id = hexEncode(filepath.c_str(), filepath.string().length());
@@ -118,11 +90,12 @@ void web::directories::process()
     }
 
     auto f2i = StringConverter::f2i(config);
-    for (const auto& [key, val] : filesMap) {
+    for (auto&& [key, val] : filesMap) {
+        auto&& [file, has] = val;
         auto ce = containers.append_child("container");
         ce.append_attribute("id") = key.c_str();
-        ce.append_attribute("child_count") = val.hasContent;
+        ce.append_attribute("child_count") = has;
 
-        ce.append_attribute("title") = f2i->convert(val.filename).c_str();
+        ce.append_attribute("title") = f2i->convert(file).c_str();
     }
 }

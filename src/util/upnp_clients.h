@@ -74,15 +74,15 @@ struct ClientInfo {
 struct ClientCacheEntry {
     struct sockaddr_storage addr;
     std::string userAgent;
-    std::chrono::time_point<std::chrono::steady_clock> last;
-    std::chrono::time_point<std::chrono::steady_clock> age;
+    std::chrono::seconds last;
+    std::chrono::seconds age;
     const struct ClientInfo* pInfo;
 };
 
 class Clients {
 public:
     explicit Clients(const std::shared_ptr<Config>& config);
-    virtual ~Clients();
+    virtual ~Clients() = default;
 
     // always return something, 'Unknown' if we do not know better
     void getInfo(const struct sockaddr_storage* addr, const std::string& userAgent, const ClientInfo** ppInfo);
@@ -97,7 +97,7 @@ private:
     bool getInfoByCache(const struct sockaddr_storage* addr, const ClientInfo** ppInfo);
     void updateCache(const struct sockaddr_storage* addr, const std::string& userAgent, const ClientInfo* pInfo);
 
-    bool downloadDescription(const std::string& location, std::unique_ptr<pugi::xml_document>& xml);
+    static bool downloadDescription(const std::string& location, std::unique_ptr<pugi::xml_document> xml);
 
 private:
     std::mutex mutex;

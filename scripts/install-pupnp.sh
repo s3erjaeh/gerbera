@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PUPNP_VERSION="1.14.0"
+PUPNP_VERSION="1.14.7"
 UNAME=$(uname)
 
 if ! [ "$(id -u)" = 0 ]; then
@@ -30,7 +30,7 @@ else
    extraFlags="--prefix=/usr/local"
 fi
 
-./configure $extraFlags --enable-ipv6 --enable-reuseaddr
+./configure $extraFlags --enable-ipv6 --enable-reuseaddr --disable-blocking-tcp-connections
 if command -v nproc >/dev/null 2>&1; then
     make "-j$(nproc)"
 else

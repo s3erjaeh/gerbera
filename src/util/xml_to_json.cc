@@ -52,9 +52,9 @@ void Xml2Json::handleElement(std::ostringstream& buf, const pugi::xml_node& node
     bool firstChild = true;
 
     auto attrs = node.attributes();
-    size_t attributeCount = std::distance(attrs.begin(), attrs.end());
-    if (attributeCount > 0) {
-        for (const pugi::xml_attribute& at : attrs) {
+    bool haveAttribute = std::distance(attrs.begin(), attrs.end()) > 0;
+    if (haveAttribute) {
+        for (auto&& at : attrs) {
             if (!firstChild)
                 buf << ',';
             else
@@ -74,7 +74,7 @@ void Xml2Json::handleElement(std::ostringstream& buf, const pugi::xml_node& node
         firstChild = true;
     }
 
-    for (const pugi::xml_node& child : node.children()) {
+    for (auto&& child : node.children()) {
         pugi::xml_node_type type = child.type();
 
         if (type == pugi::node_element) {
@@ -84,9 +84,8 @@ void Xml2Json::handleElement(std::ostringstream& buf, const pugi::xml_node& node
                 firstChild = false;
 
             // look ahead
-            auto childAttrs = child.attributes();
-            size_t childAttributeCount = std::distance(childAttrs.begin(), childAttrs.end());
-            size_t childElementCount = std::count_if(child.children().begin(), child.children().end(), [&](const auto& el) { return el.type() == pugi::node_element; });
+            bool haveChildAttribute = std::distance(child.attributes().begin(), child.attributes().end()) > 0;
+            bool haveChildElement = std::any_of(child.children().begin(), child.children().end(), [&](auto&& el) { return el.type() == pugi::node_element; });
 
             if (array) {
                 if (nodeName != child.name())
@@ -95,7 +94,7 @@ void Xml2Json::handleElement(std::ostringstream& buf, const pugi::xml_node& node
                 buf << getAsString(child.name()) << ':';
             }
 
-            if (childAttributeCount > 0 || childElementCount > 0 || isArray(child, hints, nullptr)) {
+            if (haveChildAttribute || haveChildElement || isArray(child, hints, nullptr)) {
                 buf << '{';
                 handleElement(buf, child, hints);
                 buf << '}';
@@ -107,16 +106,6 @@ void Xml2Json::handleElement(std::ostringstream& buf, const pugi::xml_node& node
 
     if (array)
         buf << ']';
-}
-
-static const std::string& replaceAllString(std::string& str, std::string_view from, const std::string& to)
-{
-    size_t start_pos = str.find(from);
-    while (start_pos != std::string::npos) {
-        str.replace(start_pos, from.length(), to);
-        start_pos = str.find(from, start_pos + to.length());
-    }
-    return str;
 }
 
 std::string Xml2Json::getAsString(const char* str)
@@ -131,7 +120,7 @@ std::string Xml2Json::getAsString(const char* str)
 std::string Xml2Json::getValue(const std::string& name, const char* text, const Hints& hints)
 {
     std::string str = text;
-    auto& hintsType = hints.asType;
+    auto&& hintsType = hints.asType;
 
     auto hint = hintsType.find(name);
 
@@ -162,7 +151,7 @@ std::string Xml2Json::getValue(const std::string& name, const char* text, const 
 
 bool Xml2Json::isArray(const pugi::xml_node& node, const Hints& hints, std::string* arrayName)
 {
-    auto& hintsArray = hints.asArray;
+    auto&& hintsArray = hints.asArray;
     auto hint = hintsArray.find(node);
 
     if (hint == hintsArray.end()) {

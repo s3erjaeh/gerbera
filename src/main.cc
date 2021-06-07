@@ -1,29 +1,29 @@
 /*MT*
-    
+
     MediaTomb - http://www.mediatomb.cc/
-    
+
     main.cc - this file is part of MediaTomb.
-    
+
     Copyright (C) 2005 Gena Batyan <bgeradz@mediatomb.cc>,
                        Sergey 'Jin' Bostandzhyan <jin@mediatomb.cc>
-    
+
     Copyright (C) 2006-2010 Gena Batyan <bgeradz@mediatomb.cc>,
                             Sergey 'Jin' Bostandzhyan <jin@mediatomb.cc>,
                             Leonhard Wimmer <leo@mediatomb.cc>
-    
+
     MediaTomb is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation.
-    
+
     MediaTomb is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
-    
+
     You should have received a copy of the GNU General Public License
     version 2 along with MediaTomb; if not, write to the Free Software
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
-    
+
     $Id$
 */
 
@@ -35,13 +35,31 @@
 /// running "doxygen doxygen.conf" from the mediatomb/doc/ directory.
 
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <spdlog/sinks/basic_file_sink.h>
 
+#include <upnpconfig.h>
+#ifdef UPNP_HAVE_TOOLS
+#include <upnptools.h>
+#endif
+
 #ifdef SOLARIS
 #include <iso/limits_iso.h>
 #endif
+
+// those are needed for -P pidfile, -u user and -d daemonize options
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <fcntl.h>
+#include <grp.h>
+#include <pwd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "common.h"
 #include "config/config_generator.h"
@@ -82,6 +100,10 @@ static void signalHandler(int signum)
         return;
     }
 
+    if (signum == SIGSEGV) {
+        log_error("This should never happen {}:{}, killing Gerbera!", errno, std::strerror(errno));
+        exit(EXIT_FAILURE);
+    }
     if ((signum == SIGINT) || (signum == SIGTERM)) {
         _ctx.shutdown_flag++;
         if (_ctx.shutdown_flag == 1) {
@@ -107,6 +129,10 @@ static void installSignalHandler()
     action.sa_handler = signalHandler;
     action.sa_flags = 0;
     sigfillset(&action.sa_mask);
+    if (sigaction(SIGSEGV, &action, nullptr) < 0) {
+        log_error("Could not register SIGSEGV handler!");
+    }
+
     if (sigaction(SIGINT, &action, nullptr) < 0) {
         log_error("Could not register SIGINT handler!");
     }
@@ -126,23 +152,13 @@ static void installSignalHandler()
 
 int main(int argc, char** argv, char** envp)
 {
-#ifdef SOLARIS
-    std::string ld_preload;
-    char* preload = getenv("LD_PRELOAD");
-    if (preload != nullptr)
-        ld_preload = std::string(preload);
-
-    if ((preload == nullptr) || (ld_preload.find("0@0") == -1)) {
-        printf("Gerbera: Solaris check failed!\n");
-        printf("Please set the environment to match glibc behaviour!\n");
-        printf("LD_PRELOAD=/usr/lib/0@0.so.1\n");
-        exit(EXIT_FAILURE);
-    }
-#endif
     cxxopts::Options options("gerbera", "Gerbera UPnP Media Server - https://gerbera.io");
 
     options.add_options() //
         ("D,debug", "Enable debugging", cxxopts::value<bool>()->default_value("false")) //
+        ("d,daemon", "Daemonize after startup", cxxopts::value<bool>()->default_value("false")) //
+        ("u,user", "Drop privs to user", cxxopts::value<std::string>()) //
+        ("P,pidfile", "Write a pidfile to the specified location, e.g. /run/gerbera.pid", cxxopts::value<std::string>()) //
         ("e,interface", "Interface to bind with", cxxopts::value<std::string>()) //
         ("p,port", "Port to bind with, must be >=49152", cxxopts::value<in_port_t>()) //
         ("i,ip", "IP to bind with", cxxopts::value<std::string>()) //
@@ -191,7 +207,7 @@ int main(int argc, char** argv, char** envp)
         bool debug = opts["debug"].as<bool>();
         if (debug) {
             spdlog::set_level(spdlog::level::debug);
-            spdlog::set_pattern("%Y-%m-%d %X %6l: [%s:%#] %!(): %v");
+            spdlog::set_pattern("%Y-%m-%d %X.%e %6l: [%s:%#] %!(): %v");
         } else {
             spdlog::set_level(spdlog::level::info);
             spdlog::set_pattern("%Y-%m-%d %X %6l: %v");
@@ -214,6 +230,146 @@ int main(int argc, char** argv, char** envp)
             home = opts["home"].as<std::string>();
         }
 
+        // are we requested to drop privs?
+        std::optional<std::string> user;
+        if (opts.count("user") > 0) {
+            user = opts["user"].as<std::string>();
+
+            // get actual euid/egid of process
+            uid_t actual_euid = geteuid();
+
+            // get user info of requested user from passwd
+            struct passwd* user_id = getpwnam(user->c_str());
+
+            if (user_id == nullptr) {
+                log_error("Invalid user requested.");
+                exit(EXIT_FAILURE);
+            }
+
+            // set home according to /etc/passwd entry
+            if (!home.has_value()) {
+                home = user_id->pw_dir;
+            }
+
+            // we need to be euid root to become requested user/group
+            if (actual_euid != 0) {
+                log_error("Need to be root to change user.");
+                exit(EXIT_FAILURE);
+            }
+
+            // set all uids, gids and add. groups
+// mac os x does this differently, setgid and setuid are basically doing the same
+// as setresuid and setresgid on linux: setting all of real{u,g}id, effective{u,g}id and saved-set{u,g}id
+// Solaroid systems are likewise missing setresgid and setresuid
+#if defined(__APPLE__) || defined(SOLARIS) || defined(__CYGWIN__)
+            // set group-ids, then add. groups, last user-ids, all need to succeed
+            if (0 != setgid(user_id->pw_gid) || 0 != initgroups(user_id->pw_name, user_id->pw_gid) || 0 != setuid(user_id->pw_uid)) {
+#else
+            if (0 != setresgid(user_id->pw_gid, user_id->pw_gid, user_id->pw_gid) || 0 != initgroups(user_id->pw_name, user_id->pw_gid) || 0 != setresuid(user_id->pw_uid, user_id->pw_uid, user_id->pw_uid)) {
+#endif
+                log_error("Unable to change user.");
+                exit(EXIT_FAILURE);
+            }
+            log_info("Dropped to User: {}", user->c_str());
+        }
+
+        // are we requested to daemonize?
+        bool daemon = opts["daemon"].as<bool>();
+        if (daemon) {
+            pid_t pid;
+
+            // fork
+            pid = fork();
+            if (pid < 0) {
+                log_error("Unable to fork.");
+                exit(EXIT_FAILURE);
+            }
+
+            // terminate parent
+            if (pid > 0)
+                exit(EXIT_SUCCESS);
+
+            // become session leader
+            if (setsid() < 0) {
+                log_error("Unable to setsid.");
+                exit(EXIT_FAILURE);
+            }
+
+            // second fork
+            pid = fork();
+            if (pid < 0) {
+                log_error("Unable to fork.");
+                exit(EXIT_FAILURE);
+            }
+
+            // terminate parent
+            if (pid > 0)
+                exit(EXIT_SUCCESS);
+
+            // set new file permissions
+            umask(0);
+
+            // change dir to /
+            if (chdir("/")) {
+                log_error("Unable to chdir to root dir.");
+                exit(EXIT_FAILURE);
+            }
+            // close open filedescriptors belonging to a tty
+            for (auto fd = int(sysconf(_SC_OPEN_MAX)); fd >= 0; fd--) {
+                if (isatty(fd))
+                    close(fd);
+            }
+            log_info("Daemonized.");
+        }
+
+        // are we requested to write a pidfile ?
+        std::optional<std::string> pidfile;
+        if (opts.count("pidfile") > 0) {
+            pidfile = opts["pidfile"].as<std::string>();
+
+            // exit if the pidfile already exists
+            struct stat s;
+            errno = 0;
+            // for pidfile to be not there stat needs to fail and it needs
+            // to fail due to ENOENT (no such file or dir)
+            if (!(-1 == stat(pidfile->c_str(), &s) && errno == ENOENT)) {
+                log_error("Pidfile {} exists. It may be that gerbera is already", pidfile->c_str());
+                log_error("running or the file is a leftover from an unclean shutdown.");
+                log_error("In that case, remove the file before starting gerbera.");
+                exit(EXIT_FAILURE);
+            }
+
+            // get the pid of our process
+            pid_t pid = getpid();
+
+            // convert to a string
+            char pidstr[20];
+            if (0 > snprintf(pidstr, 18, "%d", pid)) {
+                log_error("Could not determine pid of running process.");
+                exit(EXIT_FAILURE);
+            }
+
+            // add a newline
+            strcat(pidstr, "\n");
+
+            // open the pidfile
+            int pidfd = open(pidfile->c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            if (-1 == pidfd) {
+                log_error("Could not create pidfile {}.", pidfile->c_str());
+                exit(EXIT_FAILURE);
+            }
+
+            // write pid to file
+            if (ssize_t(strlen(pidstr)) != write(pidfd, pidstr, strlen(pidstr))) {
+                log_error("Could not write pidfile {}.", pidfile->c_str());
+                exit(EXIT_FAILURE);
+            }
+            log_debug("Wrote pidfile {}.", pidfile->c_str());
+
+            // close filedescriptor
+            close(pidfd);
+        }
+
         std::optional<std::string> config_file;
         if (opts.count("config") > 0) {
             config_file = opts["config"].as<std::string>();
@@ -224,12 +380,12 @@ int main(int argc, char** argv, char** envp)
             confdir = opts["cfgdir"].as<std::string>();
         }
 
+        if (!confdir.has_value()) {
+            confdir = DEFAULT_CONFIG_HOME;
+        }
+
         // If home is not given by the user, get it from the environment
         if (!config_file.has_value() && !home.has_value()) {
-            if (!confdir.has_value()) {
-                confdir = DEFAULT_CONFIG_HOME;
-            }
-
             // Check XDG first
             const char* h = std::getenv("XDG_CONFIG_HOME");
             if (h != nullptr) {
@@ -274,7 +430,7 @@ int main(int argc, char** argv, char** envp)
         if (opts.count("create-config") > 0) {
             ConfigGenerator configGenerator;
 
-            std::string generated = ConfigGenerator::generate(home.value_or(""), confdir.value_or(""), dataDir.value_or(""), magic.value_or(""));
+            std::string generated = configGenerator.generate(home.value_or(""), confdir.value_or(""), dataDir.value_or(""), magic.value_or(""));
             std::cout << generated.c_str() << std::endl;
             exit(EXIT_SUCCESS);
         }
@@ -325,21 +481,23 @@ int main(int argc, char** argv, char** envp)
             server = std::make_shared<Server>(config);
             server->init();
             server->run();
-        } catch (const UpnpException& upnp_e) {
+        } catch (const UpnpException& ue) {
 
             sigemptyset(&mask_set);
             pthread_sigmask(SIG_SETMASK, &mask_set, nullptr);
 
-            if (upnp_e.getErrorCode() == UPNP_E_SOCKET_BIND) {
-                log_error("LibUPnP could not bind to socket.");
-                log_info("Please check if another instance of Gerbera or");
-                log_info("another application is running on port TCP {} or UDP 1900.", portnum.value());
-            } else if (upnp_e.getErrorCode() == UPNP_E_SOCKET_ERROR) {
-                log_error("LibUPnP Socket error.");
-                log_info("Please check if your network interface was configured for multicast!");
-                log_info("Refer to the README file for more information.");
+            if (ue.getErrorCode() == UPNP_E_SOCKET_BIND) {
+                log_error("LibUPnP could not bind to socket");
+                log_error("Please check if another instance of Gerbera or another application is running on port TCP {} or UDP 1900.", portnum.value());
+            } else if (ue.getErrorCode() == UPNP_E_SOCKET_ERROR) {
+                log_error("LibUPnP Socket error");
+                log_error("Please check if your network interface was configured for multicast!");
             } else {
-                log_error("LibUPnP error code: {}", upnp_e.getErrorCode());
+#ifdef UPNP_HAVE_TOOLS
+                log_error("Failed to start LibUPnP: {} error code: {}", UpnpGetErrorMessage(ue.getErrorCode()), ue.getErrorCode());
+#else
+                log_error("Failed to start LibUPnP: error code: {}", ue.getErrorCode());
+#endif
             }
 
             try {
@@ -359,16 +517,22 @@ int main(int argc, char** argv, char** envp)
 
         if (opts.count("add-file") > 0) {
             auto files = opts["add-file"].as<std::vector<std::string>>();
-            for (const auto& f : files) {
+            for (auto&& f : files) {
                 try {
-                    // add file/directory recursively and asynchronously
-                    AutoScanSetting asSetting;
-                    asSetting.followSymlinks = configManager->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS);
-                    asSetting.recursive = true;
-                    asSetting.hidden = configManager->getBoolOption(CFG_IMPORT_HIDDEN_FILES);
-                    asSetting.rescanResource = false;
-                    asSetting.mergeOptions(configManager, f);
-                    server->getContent()->addFile(std::string(f), asSetting, true);
+                    std::error_code ec;
+                    auto dirEnt = fs::directory_entry(f, ec);
+                    if (!ec) {
+                        // add file/directory recursively and asynchronously
+                        AutoScanSetting asSetting;
+                        asSetting.followSymlinks = configManager->getBoolOption(CFG_IMPORT_FOLLOW_SYMLINKS);
+                        asSetting.recursive = true;
+                        asSetting.hidden = configManager->getBoolOption(CFG_IMPORT_HIDDEN_FILES);
+                        asSetting.rescanResource = false;
+                        asSetting.mergeOptions(configManager, f);
+                        server->getContent()->addFile(dirEnt, asSetting, true);
+                    } else {
+                        log_error("Failed to read {}: {}", f.c_str(), ec.message());
+                    }
                 } catch (const std::runtime_error& e) {
                     log_error("{}", e.what());
                     exit(EXIT_FAILURE);
@@ -437,6 +601,15 @@ int main(int argc, char** argv, char** envp)
         } catch (const std::runtime_error& e) {
             log_error("main: error {}", e.what());
             ret = EXIT_FAILURE;
+        }
+
+        // remove pidfile if one was written
+        if (opts.count("pidfile") > 0) {
+            if (0 == remove(pidfile->c_str())) {
+                log_debug("Pidfile {} removed.", pidfile->c_str());
+            } else {
+                log_info("Could not remove pidfile {}", pidfile->c_str());
+            }
         }
 
         log_info("Gerbera exiting. Have a nice day.");

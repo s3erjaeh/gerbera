@@ -31,6 +31,8 @@
 
 #include "builtin_layout.h" // API
 
+#include <regex>
+
 #include "config/config_manager.h"
 #include "content/content_manager.h"
 #include "metadata/metadata_handler.h"
@@ -50,14 +52,14 @@
 
 #endif //ONLINE_SERVICES
 
-void BuiltinLayout::add(const std::shared_ptr<CdsObject>& obj, int parentID, bool use_ref)
+void BuiltinLayout::add(const std::shared_ptr<CdsObject>& obj, const std::pair<int, bool>& parentID, bool use_ref)
 {
-    obj->setParentID(parentID);
+    obj->setParentID(parentID.first);
     if (use_ref)
         obj->setFlag(OBJECT_FLAG_USE_RESOURCE_REF);
     obj->setID(INVALID_OBJECT_ID);
 
-    content->addObject(obj);
+    content->addObject(obj, parentID.second);
 }
 
 std::string BuiltinLayout::esc(std::string str)
@@ -68,7 +70,7 @@ std::string BuiltinLayout::esc(std::string str)
 void BuiltinLayout::addVideo(const std::shared_ptr<CdsObject>& obj, const fs::path& rootpath)
 {
     auto f2i = StringConverter::f2i(config);
-    int id = content->addContainerChain("/Video/All Video");
+    auto id = content->addContainerChain("/Video/All Video");
 
     if (obj->getID() != INVALID_OBJECT_ID) {
         obj->setRefID(obj->getID());
@@ -78,7 +80,34 @@ void BuiltinLayout::addVideo(const std::shared_ptr<CdsObject>& obj, const fs::pa
         obj->setRefID(obj->getID());
     }
 
-    std::string dir;
+    auto meta = obj->getMetadata();
+
+    std::string date = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_CREATION_DATE));
+    if (!date.empty()) {
+        std::string year, month;
+        size_t m = -1;
+        size_t y = date.find('-');
+        if (y != std::string::npos) {
+            year = date.substr(0, y);
+            month = date.substr(y + 1);
+            m = month.find('-');
+            if (m != std::string::npos)
+                month = month.substr(0, m);
+        }
+
+        std::string chain;
+        if ((y > 0) && (m > 0)) {
+            chain = fmt::format("/Video/Year/{}/{}", esc(year), esc(month));
+            id = content->addContainerChain(chain);
+            add(obj, id);
+        }
+
+        chain = fmt::format("/Video/Date/{}", esc(date));
+        id = content->addContainerChain(chain);
+        add(obj, id);
+    }
+
+    fs::path dir;
     if (!rootpath.empty()) {
         // make location relative to rootpath: "/home/.../Videos/Action/a.mkv" with rootpath "/home/.../Videos" -> "Action"
         dir = fs::relative(obj->getLocation().parent_path(), config->getBoolOption(CFG_IMPORT_LAYOUT_PARENT_PATH) ? rootpath.parent_path() : rootpath);
@@ -87,17 +116,16 @@ void BuiltinLayout::addVideo(const std::shared_ptr<CdsObject>& obj, const fs::pa
         dir = esc(f2i->convert(getLastPath(obj->getLocation())));
 
     if (!dir.empty()) {
-        id = content->addContainerChain("/Video/Directories/" + dir);
+        id = content->addContainerChain(fmt::format("/Video/Directories/{}", dir.string().c_str()));
         add(obj, id);
     }
 }
 
 void BuiltinLayout::addImage(const std::shared_ptr<CdsObject>& obj, const fs::path& rootpath)
 {
-    int id;
     auto f2i = StringConverter::f2i(config);
 
-    id = content->addContainerChain("/Photos/All Photos");
+    auto id = content->addContainerChain("/Photos/All Photos");
     if (obj->getID() != INVALID_OBJECT_ID) {
         obj->setRefID(obj->getID());
         add(obj, id);
@@ -123,17 +151,17 @@ void BuiltinLayout::addImage(const std::shared_ptr<CdsObject>& obj, const fs::pa
 
         std::string chain;
         if ((y > 0) && (m > 0)) {
-            chain = "/Photos/Year/" + esc(year) + "/" + esc(month);
+            chain = fmt::format("/Photos/Year/{}/{}", esc(year), esc(month));
             id = content->addContainerChain(chain);
             add(obj, id);
         }
 
-        chain = "/Photos/Date/" + esc(date);
+        chain = fmt::format("/Photos/Date/{}", esc(date));
         id = content->addContainerChain(chain);
         add(obj, id);
     }
 
-    std::string dir;
+    fs::path dir;
     if (!rootpath.empty()) {
         // make location relative to rootpath: "/home/.../Photos/Action/a.mkv" with rootpath "/home/.../Photos" -> "Action"
         dir = fs::relative(obj->getLocation().parent_path(), config->getBoolOption(CFG_IMPORT_LAYOUT_PARENT_PATH) ? rootpath.parent_path() : rootpath);
@@ -142,13 +170,15 @@ void BuiltinLayout::addImage(const std::shared_ptr<CdsObject>& obj, const fs::pa
         dir = esc(f2i->convert(getLastPath(obj->getLocation())));
 
     if (!dir.empty()) {
-        id = content->addContainerChain("/Photos/Directories/" + dir);
+        id = content->addContainerChain(fmt::format("/Photos/Directories/{}", dir.string().c_str()));
         add(obj, id);
     }
 }
 
-void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
+void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj, const fs::path& rootpath)
 {
+    auto f2i = StringConverter::f2i(config);
+
     std::string desc;
 
     auto meta = obj->getMetadata();
@@ -166,15 +196,15 @@ void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
     std::string album = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_ALBUM));
     std::string album_full;
     if (!album.empty()) {
-        desc = desc + ", " + album;
+        desc = fmt::format("{}, {}", desc, album);
         album_full = album;
     } else {
         album = "Unknown";
     }
 
     if (!desc.empty())
-        desc = desc + ", ";
-    desc = desc + title;
+        desc = fmt::format("{}, ", desc);
+    desc = fmt::format("{}{}", desc, title);
 
     std::string date = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_DATE));
     std::string albumDate;
@@ -183,7 +213,7 @@ void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
         if (i != std::string::npos)
             date = date.substr(0, i);
 
-        desc = desc + ", " + date;
+        desc = fmt::format("{}, {}", desc, date);
         albumDate = esc(date);
     } else {
         date = "Unknown";
@@ -192,10 +222,12 @@ void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
     meta[MetadataHandler::getMetaFieldName(M_UPNP_DATE)] = albumDate;
 
     std::string genre = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_GENRE));
-    if (!genre.empty())
-        desc = desc + ", " + genre;
-    else
+    if (!genre.empty()) {
+        genre = mapGenre(genre);
+        desc = fmt::format("{}, {}", desc, genre);
+    } else {
         genre = "Unknown";
+    }
 
     std::string description = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_DESCRIPTION));
     if (description.empty()) {
@@ -207,7 +239,7 @@ void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
     std::string conductor = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_CONDUCTOR), "None");
     std::string orchestra = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_ORCHESTRA), "None");
 
-    int id = content->addContainerChain("/Audio/All Audio");
+    auto id = content->addContainerChain("/Audio/All Audio");
     obj->setTitle(title);
 
     // we get the main object here, so the object that we will add below
@@ -228,7 +260,7 @@ void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
 
     artist = esc(artist);
 
-    std::string chain = "/Audio/Artists/" + artist + "/All Songs";
+    std::string chain = fmt::format("/Audio/Artists/{}/All Songs", artist);
 
     id = content->addContainerChain(chain);
     add(obj, id);
@@ -238,48 +270,59 @@ void BuiltinLayout::addAudio(const std::shared_ptr<CdsObject>& obj)
         temp = artist_full;
 
     if (!album_full.empty())
-        temp = temp + " - " + album_full + " - ";
+        temp = fmt::format("{} - {} - ", temp, album_full);
     else
-        temp = temp + " - ";
+        temp = fmt::format("{} - ", temp);
 
     album = esc(album);
-    chain = "/Audio/Artists/" + artist + "/" + album;
+    chain = fmt::format("/Audio/Artists/{}/{}", artist, album);
     id = content->addContainerChain(chain, UPNP_CLASS_MUSIC_ALBUM, obj->getID(), obj);
     add(obj, id);
 
-    chain = "/Audio/Albums/" + album;
+    chain = fmt::format("/Audio/Albums/{}", album);
     id = content->addContainerChain(chain, UPNP_CLASS_MUSIC_ALBUM, obj->getID(), obj);
     add(obj, id);
 
-    chain = "/Audio/Genres/" + esc(genre);
+    chain = fmt::format("/Audio/Genres/{}", esc(genre));
     id = content->addContainerChain(chain, UPNP_CLASS_MUSIC_GENRE);
     add(obj, id);
 
-    chain = "/Audio/Composers/" + esc(composer);
+    chain = fmt::format("/Audio/Composers/{}", esc(composer));
     id = content->addContainerChain(chain, UPNP_CLASS_MUSIC_COMPOSER);
     add(obj, id);
 
-    chain = "/Audio/Year/" + esc(date);
+    chain = fmt::format("/Audio/Year/{}", esc(date));
     id = content->addContainerChain(chain);
     add(obj, id);
 
-    obj->setTitle(temp + title);
+    obj->setTitle(fmt::format("{}{}", temp, title));
 
     id = content->addContainerChain("/Audio/All - full name");
     add(obj, id);
 
-    chain = "/Audio/Artists/" + artist + "/All - full name";
+    chain = fmt::format("/Audio/Artists/{}/All - full name", artist);
     id = content->addContainerChain(chain);
     add(obj, id);
+
+    obj->setTitle(title);
+    fs::path dir;
+    if (!rootpath.empty()) {
+        // make location relative to rootpath: "/home/.../Audio/Action/a.mp3" with rootpath "/home/.../Audio" -> "Action"
+        dir = fs::relative(obj->getLocation().parent_path(), config->getBoolOption(CFG_IMPORT_LAYOUT_PARENT_PATH) ? rootpath.parent_path() : rootpath);
+        dir = f2i->convert(dir);
+    } else
+        dir = esc(f2i->convert(getLastPath(obj->getLocation())));
+
+    if (!dir.empty()) {
+        id = content->addContainerChain(fmt::format("/Audio/Directories/{}", dir.string().c_str()));
+        add(obj, id);
+    }
 }
 
 #ifdef SOPCAST
 void BuiltinLayout::addSopCast(const std::shared_ptr<CdsObject>& obj)
 {
 #define SP_VPATH "/Online Services/SopCast"
-    std::string chain;
-    std::string temp;
-    int id;
     bool ref_set = false;
 
     if (obj->getID() != INVALID_OBJECT_ID) {
@@ -287,22 +330,16 @@ void BuiltinLayout::addSopCast(const std::shared_ptr<CdsObject>& obj)
         ref_set = true;
     }
 
-    chain = SP_VPATH "/"
-                     "All Channels";
-    id = content->addContainerChain(chain);
+    auto id = content->addContainerChain(SP_VPATH "/All Channels");
     add(obj, id, ref_set);
     if (!ref_set) {
         obj->setRefID(obj->getID());
         ref_set = true;
     }
 
-    temp = obj->getAuxData(SOPCAST_AUXDATA_GROUP);
+    auto temp = obj->getAuxData(SOPCAST_AUXDATA_GROUP);
     if (!temp.empty()) {
-        chain = SP_VPATH "/"
-                         "Groups"
-                         "/"
-            + esc(temp);
-        id = content->addContainerChain(chain);
+        id = content->addContainerChain(fmt::format(SP_VPATH "/Groups/{}", esc(temp)));
         add(obj, id, ref_set);
     }
 }
@@ -312,7 +349,7 @@ void BuiltinLayout::addSopCast(const std::shared_ptr<CdsObject>& obj)
 void BuiltinLayout::addATrailers(const std::shared_ptr<CdsObject>& obj)
 {
 #define AT_VPATH "/Online Services/Apple Trailers"
-    int id = content->addContainerChain(AT_VPATH "/All Trailers");
+    auto id = content->addContainerChain(AT_VPATH "/All Trailers");
 
     if (obj->getID() != INVALID_OBJECT_ID) {
         obj->setRefID(obj->getID());
@@ -326,24 +363,25 @@ void BuiltinLayout::addATrailers(const std::shared_ptr<CdsObject>& obj)
 
     std::string temp = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_GENRE));
     auto genreAr = splitString(temp, ',');
-    for (auto& genre : genreAr) {
+    for (auto&& genre : genreAr) {
         genre = trimString(genre);
+        genre = mapGenre(genre);
         if (genre.empty())
             continue;
 
-        id = content->addContainerChain(AT_VPATH "/Genres/" + esc(genre));
+        id = content->addContainerChain(fmt::format(AT_VPATH "/Genres/{}", esc(genre)));
         add(obj, id);
     }
 
     temp = getValueOrDefault(meta, MetadataHandler::getMetaFieldName(M_DATE));
     if (temp.length() >= 7) {
-        id = content->addContainerChain(AT_VPATH "/Release Date/" + esc(temp.substr(0, 7)));
+        id = content->addContainerChain(fmt::format(AT_VPATH "/Release Date/{}", esc(temp.substr(0, 7))));
         add(obj, id);
     }
 
     temp = obj->getAuxData(ATRAILERS_AUXDATA_POST_DATE);
     if (temp.length() >= 7) {
-        id = content->addContainerChain(AT_VPATH "/Post Date/" + esc(temp.substr(0, 7)));
+        id = content->addContainerChain(fmt::format(AT_VPATH "/Post Date/{}", esc(temp.substr(0, 7))));
         add(obj, id);
     }
 }
@@ -352,9 +390,20 @@ void BuiltinLayout::addATrailers(const std::shared_ptr<CdsObject>& obj)
 BuiltinLayout::BuiltinLayout(std::shared_ptr<ContentManager> content)
     : Layout(std::move(content))
 {
+    genreMap = config->getDictionaryOption(CFG_IMPORT_SCRIPTING_IMPORT_GENRE_MAP);
 #ifdef ENABLE_PROFILING
-    PROF_INIT_GLOBAL(layout_profiling, "fallback layout");
+    PROF_INIT_GLOBAL(layout_profiling, "builtin layout");
 #endif
+}
+
+std::string BuiltinLayout::mapGenre(const std::string& genre)
+{
+    for (auto&& [from, to] : genreMap) {
+        if (std::regex_match(genre, std::regex(from, std::regex::ECMAScript | std::regex::icase))) {
+            return std::regex_replace(genre, std::regex(from, std::regex::ECMAScript | std::regex::icase), to);
+        }
+    }
+    return genre;
 }
 
 void BuiltinLayout::processCdsObject(std::shared_ptr<CdsObject> obj, fs::path rootpath)
@@ -400,12 +449,12 @@ void BuiltinLayout::processCdsObject(std::shared_ptr<CdsObject> obj, fs::path ro
         else if (startswith(mimetype, "image"))
             addImage(clone, rootpath);
         else if ((startswith(mimetype, "audio") && (content_type != CONTENT_TYPE_PLAYLIST)))
-            addAudio(clone);
+            addAudio(clone, rootpath);
         else if (content_type == CONTENT_TYPE_OGG) {
             if (obj->getFlag(OBJECT_FLAG_OGG_THEORA))
                 addVideo(clone, rootpath);
             else
-                addAudio(clone);
+                addAudio(clone, rootpath);
         }
 
 #ifdef ONLINE_SERVICES

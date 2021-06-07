@@ -46,11 +46,15 @@ public:
     explicit MySQLDatabase(std::shared_ptr<Config> config);
     ~MySQLDatabase() override;
 
+    MySQLDatabase(const MySQLDatabase&) = delete;
+    MySQLDatabase& operator=(const MySQLDatabase&) = delete;
+
 private:
     void init() override;
     void shutdownDriver() override;
     std::shared_ptr<Database> getSelf() override;
 
+    std::string quote(std::string_view str) const override { return quote(std::string(str)); }
     std::string quote(std::string value) const override;
     std::string quote(const char* str) const override { return quote(std::string(str)); }
     std::string quote(int val) const override { return fmt::to_string(val); }
@@ -62,6 +66,11 @@ private:
     std::string quote(long long val) const override { return fmt::to_string(val); }
     std::shared_ptr<SQLResult> select(const char* query, int length) override;
     int exec(const char* query, int length, bool getLastInsertId = false) override;
+
+    void beginTransaction(const std::string_view& tName) override;
+    void rollback(const std::string_view& tName) override;
+    void commit(const std::string_view& tName) override;
+
     void storeInternalSetting(const std::string& key, const std::string& value) override;
 
     void _exec(const char* query, int length = -1);
@@ -71,9 +80,6 @@ private:
     bool mysql_connection;
 
     static std::string getError(MYSQL* db);
-
-    std::recursive_mutex mysqlMutex;
-    using AutoLock = std::lock_guard<decltype(mysqlMutex)>;
 
     void threadCleanup() override;
     bool threadCleanupRequired() const override { return true; }
@@ -88,6 +94,9 @@ class MysqlResult : public SQLResult {
 public:
     explicit MysqlResult(MYSQL_RES* mysql_res);
     ~MysqlResult() override;
+
+    MysqlResult(const MysqlResult&) = delete;
+    MysqlResult& operator=(const MysqlResult&) = delete;
 
 private:
     int nullRead;

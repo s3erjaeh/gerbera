@@ -39,12 +39,11 @@
 #include "util/tools.h"
 
 ATrailersContentHandler::ATrailersContentHandler(const std::shared_ptr<Context>& context)
-    : config(context->getConfig())
-    , database(context->getDatabase())
+    : CurlContentHandler(context)
 {
 }
 
-void ATrailersContentHandler::setServiceContent(std::unique_ptr<pugi::xml_document>& service)
+void ATrailersContentHandler::setServiceContent(std::unique_ptr<pugi::xml_document> service)
 {
     service_xml = std::move(service);
     auto root = service_xml->document_element();
@@ -166,7 +165,7 @@ std::shared_ptr<CdsObject> ATrailersContentHandler::getObject(const pugi::xml_no
     auto cast = trailer.child("cast");
     if (cast != nullptr) {
         std::string actors;
-        for (const pugi::xml_node& actor : cast.children()) {
+        for (auto&& actor : cast.children()) {
             if (actor.type() != pugi::node_element)
                 return nullptr;
             if (std::string(actor.name()) != "name")
@@ -188,7 +187,7 @@ std::shared_ptr<CdsObject> ATrailersContentHandler::getObject(const pugi::xml_no
     auto genre = trailer.child("genre");
     if (genre != nullptr) {
         std::string genres;
-        for (const pugi::xml_node& gn : genre.children()) {
+        for (auto&& gn : genre.children()) {
             if (gn.type() != pugi::node_element)
                 return nullptr;
             if (std::string(gn.name()) != "name")
@@ -223,7 +222,7 @@ std::shared_ptr<CdsObject> ATrailersContentHandler::getObject(const pugi::xml_no
     item->setFlag(OBJECT_FLAG_ONLINE_SERVICE);
     try {
         item->validate();
-        return item;
+        return std::move(item);
     } catch (const std::runtime_error& ex) {
         log_warning("Failed to validate newly created Trailer item: {}",
             ex.what());

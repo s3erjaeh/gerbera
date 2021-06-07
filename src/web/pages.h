@@ -50,7 +50,7 @@ class SessionManager;
 /// \brief Authentication handler (used over AJAX)
 class auth : public WebRequestHandler {
 protected:
-    int timeout;
+    std::chrono::seconds timeout {};
 
 public:
     explicit auth(std::shared_ptr<ContentManager> content);
@@ -121,8 +121,8 @@ public:
 
 protected:
     void addContainer(int parentID);
-    std::shared_ptr<CdsObject> addItem(int parentID, std::shared_ptr<CdsItem> item);
-    std::shared_ptr<CdsObject> addUrl(int parentID, std::shared_ptr<CdsItemExternalURL> item, bool addProtocol);
+    std::shared_ptr<CdsObject> addItem(int parentID, const std::shared_ptr<CdsItem>& item);
+    std::shared_ptr<CdsObject> addUrl(int parentID, const std::shared_ptr<CdsItemExternalURL>& item, bool addProtocol);
 };
 
 /// \brief autoscan add and remove
@@ -163,7 +163,7 @@ public:
 /// \param page identifies what type of the request we are dealing with.
 /// \return the appropriate request handler.
 std::unique_ptr<WebRequestHandler> createWebRequestHandler(
-    const std::shared_ptr<ContentManager>& content,
+    std::shared_ptr<ContentManager> content,
     const std::string& page);
 
 /// \brief Browse clients list
@@ -178,7 +178,7 @@ class configLoad : public WebRequestHandler {
 protected:
     std::vector<ConfigValue> dbEntries;
     std::map<std::string, pugi::xml_node*> allItems;
-    void createItem(pugi::xml_node& item, const std::string& name, config_option_t id, config_option_t aid);
+    void createItem(pugi::xml_node& item, const std::string& name, config_option_t id, config_option_t aid, const std::shared_ptr<ConfigSetup>& cs = nullptr);
     template <typename T>
     static void setValue(pugi::xml_node& item, const T& value);
 

@@ -51,13 +51,13 @@ void Exiv2Handler::fillMetadata(std::shared_ptr<CdsObject> item)
         std::string value;
         const auto sc = StringConverter::m2i(CFG_IMPORT_LIBOPTS_EXIV2_CHARSET, item->getLocation(), config);
 
-        const auto image = Exiv2::ImageFactory::open(std::string(item->getLocation().c_str()));
+        const auto image = Exiv2::ImageFactory::open(item->getLocation().string());
         image->readMetadata();
         Exiv2::ExifData& exifData = image->exifData();
         Exiv2::XmpData& xmpData = image->xmpData();
 
         // first retrieve jpeg comment
-        std::string comment = const_cast<char*>(image->comment().c_str());
+        std::string comment = image->comment();
 
         if (exifData.empty()) {
             // no exiv2 record found in image
@@ -67,7 +67,7 @@ void Exiv2Handler::fillMetadata(std::shared_ptr<CdsObject> item)
         // get date/time
         auto md = exifData.findKey(Exiv2::ExifKey("Exif.Photo.DateTimeOriginal"));
         if (md != exifData.end()) {
-            value = sc->convert(const_cast<char*>(md->toString().c_str()));
+            value = sc->convert(md->toString());
 
             /// \todo convert date to ISO 8601 as required in the UPnP spec
             // from YYYY:MM:DD to YYYY-MM-DD
@@ -83,7 +83,7 @@ void Exiv2Handler::fillMetadata(std::shared_ptr<CdsObject> item)
         if (comment.empty()) {
             md = exifData.findKey(Exiv2::ExifKey("Exif.Photo.UserComment"));
             if (md != exifData.end())
-                comment = const_cast<char*>(md->toString().c_str());
+                comment = md->toString();
             log_debug("Comment: {}", comment.c_str());
         }
 
@@ -145,18 +145,18 @@ void Exiv2Handler::fillMetadata(std::shared_ptr<CdsObject> item)
             std::string value;
             std::string auxtag;
 
-            for (const auto& j : aux) {
-                value = "";
+            for (auto&& j : aux) {
+                value.clear();
                 auxtag = j;
                 log_debug("auxtag: {} ", auxtag.c_str());
                 if (auxtag.substr(0, 4) == "Exif") {
                     const auto md = exifData.findKey(Exiv2::ExifKey(auxtag));
                     if (md != exifData.end())
-                        value = const_cast<char*>(md->toString().c_str());
+                        value = md->toString();
                 } else if (auxtag.substr(0, 3) == "Xmp") {
                     const auto md = xmpData.findKey(Exiv2::XmpKey(auxtag));
                     if (md != xmpData.end())
-                        value = const_cast<char*>(md->toString().c_str());
+                        value = md->toString();
                 } else {
                     log_debug("Invalid Aux Tag {}", auxtag.c_str());
                     break;

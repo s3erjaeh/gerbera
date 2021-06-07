@@ -3,7 +3,7 @@
 
   search_handler.cc - this file is part of Gerbera.
 
-  Copyright (C) 2018 Gerbera Contributors
+  Copyright (C) 2018-2021 Gerbera Contributors
 
   Gerbera is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License version 2
@@ -25,13 +25,10 @@
 #include "search_handler.h" // API
 
 #include <algorithm>
-#include <cctype>
-#include <iostream>
-#include <sstream>
 #include <stack>
 
 #include "config/config_manager.h"
-#include "database/database.h"
+#include "database/sql_database.h"
 #include "util/tools.h"
 
 static const std::unordered_map<std::string_view, TokenType> tokenTypes {
@@ -108,16 +105,16 @@ std::unique_ptr<SearchToken> SearchLexer::nextToken()
         default:
             if (inQuotes) {
                 auto quotedStr = getQuotedValue(input);
-                if (quotedStr.length())
+                if (!quotedStr.empty())
                     return std::make_unique<SearchToken>(TokenType::ESCAPEDSTRING, std::move(quotedStr));
             }
             if (std::isspace(ch)) {
                 currentPos++;
             } else {
                 auto tokenStr = nextStringToken(input);
-                if (tokenStr.length()) {
+                if (!tokenStr.empty()) {
                     std::unique_ptr<SearchToken> token = makeToken(tokenStr);
-                    if (token->getValue().length())
+                    if (!token->getValue().empty())
                         return token;
                 }
             }
@@ -294,8 +291,8 @@ std::shared_ptr<ASTNode> SearchParser::parseRelationshipExpression()
     if (currentToken->getType() != TokenType::PROPERTY)
         throw_std_runtime_error("Failed to parse search criteria - expecting a property name");
 
-    std::shared_ptr<ASTNode> relationshipExpr = nullptr;
-    std::shared_ptr<ASTProperty> property = std::make_shared<ASTProperty>(sqlEmitter, currentToken->getValue());
+    auto relationshipExpr = std::shared_ptr<ASTNode>(nullptr);
+    auto property = std::make_shared<ASTProperty>(sqlEmitter, currentToken->getValue());
 
     getNextToken();
     if (currentToken->getType() == TokenType::COMPAREOP) {
@@ -389,6 +386,7 @@ std::string ASTQuotedString::emit() const
 
 std::string ASTCompareOperator::emit() const
 {
+    log_error("Emitting for ASTCompareOperator");
     throw_std_runtime_error("Should not get here");
 }
 
@@ -404,6 +402,7 @@ std::string ASTCompareExpression::emit() const
 
 std::string ASTStringOperator::emit() const
 {
+    log_error("Emitting for ASTStringOperator");
     throw_std_runtime_error("Should not get here");
 }
 
@@ -419,7 +418,7 @@ std::string ASTStringExpression::emit() const
 
 std::string ASTExistsOperator::emit() const
 {
-    std::cout << "Emitting for ASTExistsOperator " << std::endl;
+    log_error("Emitting for ASTExistsOperator");
     throw_std_runtime_error("Should not get here");
 }
 
@@ -446,22 +445,53 @@ std::string ASTOrOperator::emit() const
 std::string DefaultSQLEmitter::emitSQL(const ASTNode* node) const
 {
     std::string predicates = node->emit();
-    if (predicates.length() > 0) {
-        std::ostringstream sql;
-        sql << "from mt_cds_object c "
-            << "inner join mt_metadata m on c.id = m.item_id "
-            << "where "
-            << predicates;
-        return sql.str();
+    if (!predicates.empty()) {
+        return fmt::format("FROM {} INNER JOIN {} ON {} = {} WHERE {}",
+            colMapper->tableQuoted(), metaMapper->tableQuoted(),
+            colMapper->mapQuoted(UPNP_SEARCH_ID), metaMapper->mapQuoted(UPNP_SEARCH_ID),
+            predicates);
     }
     throw_std_runtime_error("No SQL generated from AST");
 }
 
 std::string DefaultSQLEmitter::emit(const ASTParenthesis* node, const std::string& bracketedNode) const
 {
-    std::ostringstream sqlFragment;
-    sqlFragment << "(" << bracketedNode << ")";
-    return sqlFragment.str();
+    return fmt::format("({})", bracketedNode);
+}
+
+// format indexes:
+//    0: class statement
+//    1: property name statement
+//    2: property statement lower case
+//    3: value
+const static std::map<std::string, std::string> logicOperator = {
+    { "contains", "({2} LIKE LOWER('%{3}%') AND {0} IS NOT NULL)" }, // lower
+    { "doesnotcontain", "({2} NOT LIKE LOWER('%{3}%') AND {0} IS NOT NULL)" }, // lower
+    { "startswith", "({2} LIKE LOWER('{3}%') AND {0} IS NOT NULL)" }, // lower
+    { "derivedfrom", "(LOWER({0}) LIKE LOWER('{3}%'))" },
+    //{ "derivedfrom", "{0} LIKE LOWER('{3}%')" },
+    { "exists", "({1} IS {3} AND {0} IS NOT NULL)" },
+    { "@exists", "({1} IS {3})" },
+    { "compare", "({2}LOWER('{3}') AND {0} IS NOT NULL)" }, // lower
+    { "@compare", "({2}LOWER('{3}'))" }, // lower
+};
+
+std::pair<std::string, std::string> DefaultSQLEmitter::getPropertyStatement(const std::string& property) const
+{
+    if (colMapper != nullptr && colMapper->hasEntry(property)) {
+        return {
+            colMapper->mapQuoted(property),
+            colMapper->mapQuotedLower(property)
+        };
+    }
+    if (metaMapper != nullptr) {
+        return {
+            fmt::format("{0}='{2}' AND {1}", metaMapper->mapQuoted(META_NAME), metaMapper->mapQuoted(META_VALUE), property),
+            fmt::format("{0}='{2}' AND {1}", metaMapper->mapQuoted(META_NAME), metaMapper->mapQuotedLower(META_VALUE), property)
+        };
+    }
+    log_info("Property {} not yet supported. Search may return no result!", property);
+    return { "", "" };
 }
 
 std::string DefaultSQLEmitter::emit(const ASTCompareOperator* node, const std::string& property,
@@ -469,71 +499,72 @@ std::string DefaultSQLEmitter::emit(const ASTCompareOperator* node, const std::s
 {
     auto operatr = node->getValue();
     if (operatr != "=")
-        throw_std_runtime_error("operator not yet supported");
+        throw_std_runtime_error("Operator '{}' not yet supported", operatr);
 
-    std::ostringstream sqlFragment;
-    sqlFragment << "(m.property_name='" << property << "' and lower(m.property_value)"
-                << operatr << "lower('" << value << "') and c.upnp_class is not null)";
-    return sqlFragment.str();
+    auto&& [prpUpper, prpLower] = getPropertyStatement(property);
+    auto&& [clsUpper, clcLower] = getPropertyStatement(UPNP_SEARCH_CLASS);
+    return fmt::format(logicOperator.at((property[0] == '@') ? "@compare" : "compare"), clsUpper,
+        fmt::format("{}{}", prpUpper, operatr), fmt::format("{}{}", prpLower, operatr), value);
 }
 
-std::string DefaultSQLEmitter::emit(const ASTStringOperator* node, const std::string& property,
-    const std::string& value) const
+std::string DefaultSQLEmitter::emit(const ASTStringOperator* node, const std::string& property, const std::string& value) const
 {
-    auto lcOperator = aslowercase(node->getValue());
-    if (lcOperator != "contains" && lcOperator != "doesnotcontain" && lcOperator != "derivedfrom"
-        && lcOperator != "startswith")
-        throw_std_runtime_error("operator not supported");
-
-    std::ostringstream sqlFragment;
-    if (lcOperator == "contains") {
-        sqlFragment << "(m.property_name='" << property << "' and lower(m.property_value) "
-                    << "like"
-                    << " lower('%" << value << "%') and c.upnp_class is not null)";
-    } else if (lcOperator == "doesnotcontain") {
-        sqlFragment << "(m.property_name='" << property << "' and lower(m.property_value) "
-                    << "not like"
-                    << " lower('%" << value << "%') and c.upnp_class is not null)";
-    } else if (lcOperator == "startswith") {
-        sqlFragment << "(m.property_name='" << property << "' and lower(m.property_value) "
-                    << "like"
-                    << " lower('" << value << "%') and c.upnp_class is not null)";
-    } else if (lcOperator == "derivedfrom") {
-        sqlFragment << "c.upnp_class "
-                    << "like"
-                    << " lower('" << value << ".%')";
+    auto stringOperator = aslowercase(node->getValue());
+    if (logicOperator.find(stringOperator) == logicOperator.end()) {
+        throw_std_runtime_error("Operation '{}' not yet supported", stringOperator);
     }
-    return sqlFragment.str();
+    auto&& [prpUpper, prpLower] = getPropertyStatement(property);
+    auto&& [clsUpper, clsLower] = getPropertyStatement(UPNP_SEARCH_CLASS);
+    return fmt::format(logicOperator.at(stringOperator), clsUpper, prpUpper, prpLower, value);
 }
 
-std::string DefaultSQLEmitter::emit(const ASTExistsOperator* node, const std::string& property,
-    const std::string& value) const
+std::string DefaultSQLEmitter::emit(const ASTExistsOperator* node, const std::string& property, const std::string& value) const
 {
-    std::ostringstream sqlFragment;
     std::string exists;
     if (value == "true") {
-        exists = "not null";
+        exists = "NOT NULL";
     } else if (value == "false") {
-        exists = "null";
+        exists = "NULL";
     } else {
-        throw_std_runtime_error("invalid value on rhs of exists operator");
+        throw_std_runtime_error("Invalid value '{}' on rhs of 'exists' operator", value);
     }
-    sqlFragment << "(m.property_name='" << property << "' and m.property_value is " << exists << " and c.upnp_class is not null)";
-    return sqlFragment.str();
+    auto&& [prpUpper, prpLower] = getPropertyStatement(property);
+    auto&& [clsUpper, clsLower] = getPropertyStatement(UPNP_SEARCH_CLASS);
+    return fmt::format(logicOperator.at((property[0] == '@') ? "@exists" : "exists"), clsUpper, prpUpper, prpLower, exists);
 }
 
 std::string DefaultSQLEmitter::emit(const ASTAndOperator* node, const std::string& lhs,
     const std::string& rhs) const
 {
-    std::ostringstream sqlFragment;
-    sqlFragment << lhs << " and " << rhs;
-    return sqlFragment.str();
+    return fmt::format("{} AND {}", lhs, rhs);
 }
 
 std::string DefaultSQLEmitter::emit(const ASTOrOperator* node, const std::string& lhs,
     const std::string& rhs) const
 {
-    std::ostringstream sqlFragment;
-    sqlFragment << lhs << " or " << rhs;
-    return sqlFragment.str();
+    return fmt::format("{} OR {}", lhs, rhs);
+}
+
+std::string SortParser::parse()
+{
+    if (sortCrit.empty()) {
+        return "";
+    }
+    std::vector<std::string> sort;
+    for (auto&& seg : splitString(sortCrit, ',')) {
+        seg = trimString(seg);
+        bool desc = (seg[0] == '-');
+        if (seg[0] == '-' || seg[0] == '+') {
+            seg = seg.substr(1);
+        } else {
+            log_warning("Unknown sort direction '{}' in '{}'", seg, sortCrit);
+        }
+        auto sortSql = colMapper != nullptr ? colMapper->mapQuoted(seg) : "";
+        if (!sortSql.empty()) {
+            sort.emplace_back(fmt::format("{} {}", sortSql, (desc ? "DESC" : "ASC")));
+        } else {
+            log_warning("Unknown sort key '{}' in '{}'", seg, sortCrit);
+        }
+    }
+    return join(sort, ", ");
 }

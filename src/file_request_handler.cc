@@ -54,6 +54,28 @@ FileRequestHandler::FileRequestHandler(std::shared_ptr<ContentManager> content, 
 {
 }
 
+static bool checkFileAndSubtitle(fs::path& path, const std::shared_ptr<CdsObject>& obj, const size_t& res_id, std::string& mimeType, struct stat& statbuf, const std::string& rh)
+{
+    bool is_srt = false;
+
+    if (!rh.empty()) {
+        auto res_path = obj->getResource(res_id)->getAttribute(R_RESOURCE_FILE);
+        mimeType = MIMETYPE_TEXT;
+        is_srt = !res_path.empty();
+        if (is_srt) {
+            path = res_path;
+        }
+    }
+    int ret = stat(path.c_str(), &statbuf);
+    if (ret != 0) {
+        if (is_srt) {
+            throw SubtitlesNotFoundException(fmt::format("Subtitle file {} is not available.", path.c_str()));
+        }
+        throw_std_runtime_error("Failed to open {}: {}", path.c_str(), std::strerror(errno));
+    }
+    return is_srt;
+}
+
 void FileRequestHandler::getInfo(const char* filename, UpnpFileInfo* info)
 {
     log_debug("start");
@@ -70,12 +92,8 @@ void FileRequestHandler::getInfo(const char* filename, UpnpFileInfo* info)
     std::string rh = getValueOrDefault(params, RESOURCE_HANDLER);
 
     // determining which resource to serve
-    size_t res_id = 0;
     auto res_id_it = params.find(URL_RESOURCE_ID);
-    if (res_id_it != params.end() && res_id_it->second != URL_VALUE_TRANSCODE_NO_RES_ID)
-        res_id = std::stoi(res_id_it->second);
-    else
-        res_id = SIZE_MAX;
+    size_t res_id = (res_id_it != params.end() && res_id_it->second != URL_VALUE_TRANSCODE_NO_RES_ID) ? std::stoi(res_id_it->second) : std::numeric_limits<std::size_t>::max();
 
     if (!obj->isItem() && rh.empty()) {
         throw_std_runtime_error("Requested object {} is not an item", filename);
@@ -84,44 +102,11 @@ void FileRequestHandler::getInfo(const char* filename, UpnpFileInfo* info)
     auto item = std::dynamic_pointer_cast<CdsItem>(obj);
 
     fs::path path = item != nullptr ? item->getLocation() : "";
-    bool is_srt = false;
-
     std::string mimeType;
-
-    std::string ext = getValueOrDefault(params, "ext");
-    size_t edot = ext.rfind('.');
-    if (edot != std::string::npos)
-        ext = ext.substr(edot);
-
-    if ((ext == ".srt") || (ext == ".ssa") || (ext == ".smi") || (ext == ".sub")) {
-        // remove .ext
-        std::string pathNoExt = path.parent_path() / path.stem();
-        path = pathNoExt + ext;
-        mimeType = MIMETYPE_TEXT;
-
-        // reset resource id
-        res_id = 0;
-        is_srt = true;
-    }
-
     struct stat statbuf;
-    int ret = stat(path.c_str(), &statbuf);
-    if (ret != 0 && !rh.empty()) {
-        path = obj->getResource(res_id)->getAttribute(R_RESOURCE_FILE);
-        ret = stat(path.c_str(), &statbuf);
-    }
-    if (ret != 0) {
-        if (is_srt)
-            throw SubtitlesNotFoundException(fmt::format("Subtitle file {} is not available.", path.c_str()));
+    bool is_srt = checkFileAndSubtitle(path, obj, res_id, mimeType, statbuf, rh);
 
-        throw_std_runtime_error("Failed to open {}: {}", path.c_str(), std::strerror(errno));
-    }
-
-    if (access(path.c_str(), R_OK) == 0) {
-        UpnpFileInfo_set_IsReadable(info, 1);
-    } else {
-        UpnpFileInfo_set_IsReadable(info, 0);
-    }
+    UpnpFileInfo_set_IsReadable(info, access(path.c_str(), R_OK) == 0);
 
     std::string header;
     log_debug("path: {}", path.c_str());
@@ -178,12 +163,16 @@ void FileRequestHandler::getInfo(const char* filename, UpnpFileInfo* info)
             std::string freq = obj->getResource(0)->getAttribute(R_SAMPLEFREQUENCY);
             std::string nrch = obj->getResource(0)->getAttribute(R_NRAUDIOCHANNELS);
             if (!freq.empty())
-                mimeType = mimeType + ";rate=" + freq;
+                mimeType += fmt::format(";rate={}", freq);
             if (!nrch.empty())
-                mimeType = mimeType + ";channels=" + nrch;
+                mimeType += fmt::format(";channels={}", nrch);
         }
 
+#ifdef UPNP_USING_CHUNKED
+        UpnpFileInfo_set_FileLength(info, UPNP_USING_CHUNKED);
+#else
         UpnpFileInfo_set_FileLength(info, -1);
+#endif
     } else if (item != nullptr) {
         UpnpFileInfo_set_FileLength(info, statbuf.st_size);
 
@@ -238,12 +227,8 @@ std::unique_ptr<IOHandler> FileRequestHandler::open(const char* filename, enum U
     std::string rh = getValueOrDefault(params, RESOURCE_HANDLER);
 
     // determining which resource to serve
-    size_t res_id = 0;
     auto res_id_it = params.find(URL_RESOURCE_ID);
-    if (res_id_it != params.end() && res_id_it->second != URL_VALUE_TRANSCODE_NO_RES_ID)
-        res_id = std::stoi(res_id_it->second);
-    else
-        res_id = SIZE_MAX;
+    size_t res_id = (res_id_it != params.end() && res_id_it->second != URL_VALUE_TRANSCODE_NO_RES_ID) ? std::stoi(res_id_it->second) : std::numeric_limits<std::size_t>::max();
 
     if (!obj->isItem() && rh.empty()) {
         throw_std_runtime_error("requested object {} is not an item", filename);
@@ -252,43 +237,17 @@ std::unique_ptr<IOHandler> FileRequestHandler::open(const char* filename, enum U
     auto item = std::dynamic_pointer_cast<CdsItem>(obj);
 
     fs::path path = item != nullptr ? item->getLocation() : "";
-
-    bool is_srt = false;
-
-    std::string ext = getValueOrDefault(params, "ext");
-    size_t edot = ext.rfind('.');
-    if (edot != std::string::npos)
-        ext = ext.substr(edot);
-    if ((ext == ".srt") || (ext == ".ssa") || (ext == ".smi") || (ext == ".sub")) {
-        // remove .ext
-        std::string pathNoExt = path.parent_path() / path.stem();
-        path = pathNoExt + ext;
-
-        // reset resource id
-        res_id = 0;
-        is_srt = true;
-    }
-
+    std::string mimeType;
     struct stat statbuf;
-    int ret = stat(path.c_str(), &statbuf);
-    if (ret != 0 && !rh.empty()) {
-        path = obj->getResource(res_id)->getAttribute(R_RESOURCE_FILE);
-        ret = stat(path.c_str(), &statbuf);
-    }
-    if (ret != 0) {
-        if (is_srt)
-            throw SubtitlesNotFoundException(fmt::format("Subtitle file {} is not available.", path.c_str()));
-
-        throw_std_runtime_error("Failed to open {}: {}", path.c_str(), std::strerror(errno));
-    }
+    bool is_srt = checkFileAndSubtitle(path, obj, res_id, mimeType, statbuf, rh);
 
     // for transcoded resourecs res_id will always be negative
     auto tr_profile = getValueOrDefault(params, URL_PARAM_TRANSCODE_PROFILE_NAME);
     if (!tr_profile.empty()) {
-        if (res_id != SIZE_MAX)
+        if (res_id != std::numeric_limits<std::size_t>::max())
             throw_std_runtime_error("Invalid resource ID given");
     } else {
-        if (res_id == SIZE_MAX)
+        if (res_id == std::numeric_limits<std::size_t>::max())
             throw_std_runtime_error("Invalid resource ID given");
     }
     log_debug("fetching resource id {}", res_id);
@@ -297,13 +256,7 @@ std::unique_ptr<IOHandler> FileRequestHandler::open(const char* filename, enum U
     // so we can not load such a resource for a particular item, we will have
     // to trust the resource handler parameter
     if ((res_id > 0 && res_id < obj->getResourceCount()) || !rh.empty()) {
-        int res_handler;
-        if (!rh.empty())
-            res_handler = std::stoi(rh);
-        else {
-            auto resource = obj->getResource(res_id);
-            res_handler = resource->getHandlerType();
-        }
+        auto res_handler = int { !rh.empty() ? std::stoi(rh) : obj->getResource(res_id)->getHandlerType() };
 
         auto h = MetadataHandler::createHandler(context, res_handler);
         auto io_handler = h->serveContent(obj, res_id);
@@ -332,5 +285,5 @@ std::unique_ptr<IOHandler> FileRequestHandler::open(const char* filename, enum U
     content->triggerPlayHook(obj);
 
     log_debug("end");
-    return io_handler;
+    return std::move(io_handler);
 }

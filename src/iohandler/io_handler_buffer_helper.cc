@@ -35,7 +35,8 @@
 
 #include "config/config_manager.h"
 
-IOHandlerBufferHelper::IOHandlerBufferHelper(size_t bufSize, size_t initialFillSize)
+IOHandlerBufferHelper::IOHandlerBufferHelper(std::shared_ptr<Config> config, size_t bufSize, size_t initialFillSize)
+    : config(std::move(config))
 {
     if (bufSize == 0)
         throw_std_runtime_error("bufSize must be greater than 0");
@@ -82,14 +83,14 @@ size_t IOHandlerBufferHelper::read(char* buf, size_t length)
     // length must be positive
     assert(length > 0);
 
-    std::unique_lock<std::mutex> lock(mutex);
+    auto lock = threadRunner->uniqueLock();
 
     while ((empty || waitForInitialFillSize) && !(threadShutdown || eof || readError)) {
         if (checkSocket) {
             checkSocket = false;
             return CHECK_SOCKET;
         }
-        cond.wait(lock);
+        threadRunner->wait(lock);
     }
 
     if (readError || threadShutdown)
@@ -101,13 +102,13 @@ size_t IOHandlerBufferHelper::read(char* buf, size_t length)
     lock.unlock();
 
     // we ensured with the while above that the buffer isn't empty
-    int currentFillSize = bLocal - a;
+    auto currentFillSize = int(bLocal - a);
     if (currentFillSize <= 0)
         currentFillSize += bufSize;
-    size_t maxRead1 = (a < bLocal ? bLocal - a : bufSize - a);
-    size_t read1 = (maxRead1 > length ? length : maxRead1);
-    size_t maxRead2 = currentFillSize - read1;
-    size_t read2 = (read1 < length ? length - read1 : 0);
+    auto maxRead1 = size_t(a < bLocal ? bLocal - a : bufSize - a);
+    auto read1 = size_t(maxRead1 > length ? length : maxRead1);
+    auto maxRead2 = size_t(currentFillSize - read1);
+    auto read2 = size_t(read1 < length ? length - read1 : 0);
     if (read2 > maxRead2)
         read2 = maxRead2;
 
@@ -122,7 +123,7 @@ size_t IOHandlerBufferHelper::read(char* buf, size_t length)
     bool signalled = false;
     // was the buffer full or became it "full" while we read?
     if (signalAfterEveryRead || a == b) {
-        cond.notify_one();
+        threadRunner->notify();
         signalled = true;
     }
 
@@ -132,7 +133,7 @@ size_t IOHandlerBufferHelper::read(char* buf, size_t length)
     if (a == b) {
         empty = true;
         if (!signalled)
-            cond.notify_one();
+            threadRunner->notify();
     }
 
     posRead += didRead;
@@ -156,7 +157,7 @@ void IOHandlerBufferHelper::seek(off_t offset, int whence)
     if (whence == SEEK_CUR && offset == 0)
         return;
 
-    std::unique_lock<std::mutex> lock(mutex);
+    auto lock = threadRunner->uniqueLock();
 
     // if another seek isn't processed yet - well we don't care as this new seek
     // will change the position anyway
@@ -165,10 +166,10 @@ void IOHandlerBufferHelper::seek(off_t offset, int whence)
     seekWhence = whence;
 
     // tell the probably sleeping thread to process our seek
-    cond.notify_one();
+    threadRunner->notify();
 
     // wait until the seek has been processed
-    cond.wait(lock, [&]() {
+    threadRunner->wait(lock, [&]() {
         return !doSeek || threadShutdown || eof || readError;
     });
 }
@@ -187,28 +188,23 @@ void IOHandlerBufferHelper::close()
 
 void IOHandlerBufferHelper::startBufferThread()
 {
-    pthread_create(
-        &bufferThread,
-        nullptr, // attr
-        IOHandlerBufferHelper::staticThreadProc,
-        this);
+    threadRunner = std::make_unique<StdThreadRunner>("BufferHelperThread", IOHandlerBufferHelper::staticThreadProc, this, config);
 }
 
 void IOHandlerBufferHelper::stopBufferThread()
 {
-    std::unique_lock<std::mutex> lock(mutex);
+    auto lock = threadRunner->uniqueLock();
     threadShutdown = true;
-    cond.notify_one();
+    threadRunner->notify();
     lock.unlock();
 
-    if (bufferThread)
-        pthread_join(bufferThread, nullptr);
-    bufferThread = 0;
+    threadRunner->join();
+    threadRunner = nullptr;
 }
 
 void* IOHandlerBufferHelper::staticThreadProc(void* arg)
 {
     auto inst = static_cast<IOHandlerBufferHelper*>(arg);
     inst->threadProc();
-    pthread_exit(nullptr);
+    return nullptr;
 }

@@ -77,13 +77,13 @@ static constexpr bool IS_CDS_ITEM_EXTERNAL_URL(unsigned int type) { return type 
 class CdsObject {
 protected:
     /// \brief ID of the object in the content directory
-    int id;
+    int id { INVALID_OBJECT_ID };
 
     /// \brief ID of the referenced object
-    int refID;
+    int refID { INVALID_OBJECT_ID };
 
     /// \brief ID of the object's parent
-    int parentID;
+    int parentID { INVALID_OBJECT_ID };
 
     /// \brief dc:title
     std::string title;
@@ -96,22 +96,22 @@ protected:
 
     /// \brief Last modification time in the file system.
     /// In seconds since UNIX epoch.
-    time_t mtime;
+    std::chrono::seconds mtime {};
 
     /// \brief File size on disk (in bytes).
-    off_t sizeOnDisk;
+    off_t sizeOnDisk { 0 };
 
     /// \brief virtual object flag
-    bool virt;
+    bool virt { false };
 
     /// \brief type of the object: item, container, etc.
     unsigned int objectType;
 
     /// \brief field which can hold various flags for the object
-    unsigned int objectFlags;
+    unsigned int objectFlags { OBJECT_FLAG_RESTRICTED };
 
     /// \brief flag that allows to sort objects within a container
-    int sortPriority;
+    int sortPriority { 0 };
 
     std::map<std::string, std::string> metadata;
     std::map<std::string, std::string> auxdata;
@@ -120,11 +120,8 @@ protected:
     /// \brief reference to parent, transporting details from import script
     std::shared_ptr<CdsObject> parent;
 
-    virtual ~CdsObject() = default;
-
 public:
-    /// \brief Constructor. Sets the default values.
-    explicit CdsObject();
+    virtual ~CdsObject() = default;
 
     /// \brief Set the object ID.
     ///
@@ -175,16 +172,16 @@ public:
     std::string getClass() const { return upnpClass; }
 
     /// \brief Set the physical location of the media (usually an absolute path)
-    void setLocation(fs::path location) { this->location = std::move(location); }
+    void setLocation(const fs::path& location) { this->location = location; }
 
     /// \brief Retrieve media location.
     fs::path getLocation() const { return location; }
 
     /// \brief Set modification time of the media file.
-    void setMTime(time_t mtime) { this->mtime = mtime; }
+    void setMTime(std::chrono::seconds mtime) { this->mtime = mtime; }
 
     /// \brief Retrieve the file modification time (in seconds since UNIX epoch).
-    time_t getMTime() const { return mtime; }
+    std::chrono::seconds getMTime() const { return mtime; }
 
     /// \brief Set file size.
     void setSizeOnDisk(off_t sizeOnDisk) { this->sizeOnDisk = sizeOnDisk; }
@@ -220,10 +217,10 @@ public:
     /// \brief Set flags for the object.
     void setFlags(unsigned int objectFlags) { this->objectFlags = objectFlags; }
 
-    /// \biref Set a flag of the object.
+    /// \brief Set a flag of the object.
     void setFlag(unsigned int mask) { objectFlags |= mask; }
 
-    /// \biref Set a flag of the object.
+    /// \brief Set a flag of the object.
     void changeFlag(unsigned int mask, bool value)
     {
         if (value)
@@ -232,7 +229,7 @@ public:
             clearFlag(mask);
     }
 
-    /// \biref Clears a flag of the object.
+    /// \brief Clears a flag of the object.
     void clearFlag(unsigned int mask) { objectFlags &= ~mask; }
 
     /// \brief Query single metadata value.
@@ -307,13 +304,13 @@ public:
     /// \brief Search resources for given handler id
     bool hasResource(int id) const
     {
-        return std::any_of(resources.begin(), resources.end(), [=](const auto& res) { return id == res->getHandlerType(); });
+        return std::any_of(resources.begin(), resources.end(), [=](auto&& res) { return id == res->getHandlerType(); });
     }
 
     /// \brief Remove resource with given handler id
     void removeResource(int id)
     {
-        auto index = std::find_if(resources.begin(), resources.end(), [=](const auto& res) { return id == res->getHandlerType(); });
+        auto index = std::find_if(resources.begin(), resources.end(), [=](auto&& res) { return id == res->getHandlerType(); });
         if (index != resources.end()) {
             resources.erase(index);
         }
@@ -359,23 +356,25 @@ public:
 
     static std::shared_ptr<CdsObject> createObject(unsigned int objectType);
 
-    static std::string mapObjectType(unsigned int objectType);
+    static std::string_view mapObjectType(unsigned int objectType);
 };
 
 /// \brief An Item in the content directory.
 class CdsItem : public CdsObject {
 protected:
     /// \brief mime-type of the media.
-    std::string mimeType;
+    std::string mimeType { MIMETYPE_DEFAULT };
 
     /// \brief number of part, e.g. disk or season
-    int partNumber;
+    int partNumber { 0 };
 
     /// \brief number of track e.g. track on disk or episode of season
-    int trackNumber;
+    int trackNumber { 0 };
 
     /// \brief unique service ID
     std::string serviceID;
+
+    std::chrono::milliseconds bookMarkPos {};
 
 public:
     /// \brief Constructor, sets the object type and default upnp:class (object.item)
@@ -417,6 +416,12 @@ public:
 
     /// \brief Retrieve the unique service ID.
     std::string getServiceID() const { return serviceID; }
+
+    /// \brief Retrieve the last known bookmark position in milliseconds.
+    void setBookMarkPos(std::chrono::milliseconds bookMarkPos) { this->bookMarkPos = bookMarkPos; }
+
+    /// \brief Set the bookmark position in milliseconds.
+    std::chrono::milliseconds getBookMarkPos() const { return bookMarkPos; }
 };
 
 /// \brief An item that is accessible via a URL.
@@ -432,7 +437,7 @@ public:
     void setURL(const std::string& URL) { this->location = URL; }
 
     /// \brief Get the URL of the item.
-    std::string getURL() const { return location; }
+    std::string getURL() const { return location.string(); }
     /// \brief Copies all object properties to another object.
     /// \param obj target object (clone)
     //void copyTo(std::shared_ptr<CdsObject> obj) override;
@@ -450,13 +455,13 @@ public:
 class CdsContainer final : public CdsObject {
 protected:
     /// \brief container update id.
-    int updateID;
+    int updateID { 0 };
 
     /// \brief childCount attribute
-    int childCount;
+    int childCount { -1 };
 
     /// \brief whether this container is an autoscan start point.
-    int autoscanType;
+    int autoscanType { OBJECT_AUTOSCAN_NONE };
 
 public:
     /// \brief Constructor, initializes default values for the flags and sets the object type.

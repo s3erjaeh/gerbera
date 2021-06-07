@@ -45,25 +45,17 @@ std::string OnlineServiceHelper::resolveURL(const std::shared_ptr<CdsItemExterna
     if (service > OS_Max)
         throw_std_runtime_error("Invalid service id");
 
-    std::string url;
-
-    switch (service) {
 #ifdef SOPCAST
-    case OS_SopCast:
-        url = item->getLocation();
-        break;
+    if (service == OS_SopCast) {
+        return item->getLocation().string();
+    }
 #endif
 #ifdef ATRAILERS
-    case OS_ATrailers:
-        url = item->getLocation();
-        break;
-#endif
-    case OS_Max:
-    default:
-        throw_std_runtime_error("No handler for this service");
+    if (service == OS_ATrailers) {
+        return item->getLocation().string();
     }
-
-    return url;
+#endif
+    throw_std_runtime_error("No handler for this service");
 }
 
 #endif //ONLINE_SERVICES

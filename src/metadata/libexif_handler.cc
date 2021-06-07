@@ -336,7 +336,7 @@ void LibExifHandler::process_ifd(ExifContent* content, const std::shared_ptr<Cds
         }
 
         // if there are any auxilary tags that the user wants - add them
-        for (const auto& tmp : auxtags) {
+        for (auto&& tmp : auxtags) {
             if (!tmp.empty()) {
                 if (e->tag == getTagFromString(tmp)) {
                     value = const_cast<char*>(exif_egv(e));
@@ -371,7 +371,7 @@ void LibExifHandler::fillMetadata(std::shared_ptr<CdsObject> obj)
     }
 
     std::vector<std::string> aux = config->getArrayOption(CFG_IMPORT_LIBOPTS_EXIF_AUXDATA_TAGS_LIST);
-    for (const auto& i : ed->ifd) {
+    for (auto&& i : ed->ifd) {
         if (i)
             process_ifd(i, item, sc, aux);
     }
@@ -385,7 +385,7 @@ void LibExifHandler::fillMetadata(std::shared_ptr<CdsObject> obj)
 
     if (ed->size) {
         try {
-            std::unique_ptr<IOHandler> io_h(new MemIOHandler(ed->data, ed->size));
+            std::unique_ptr<IOHandler> io_h = std::make_unique<MemIOHandler>(ed->data, ed->size);
             io_h->open(UPNP_READ);
             std::string th_resolution = get_jpeg_resolution(io_h);
             log_debug("RESOLUTION: {}", th_resolution.c_str());
@@ -424,6 +424,6 @@ std::unique_ptr<IOHandler> LibExifHandler::serveContent(std::shared_ptr<CdsObjec
 
     auto h = std::make_unique<MemIOHandler>(ed->data, ed->size);
     exif_data_unref(ed);
-    return h;
+    return std::move(h);
 }
 #endif // HAVE_LIBEXIF

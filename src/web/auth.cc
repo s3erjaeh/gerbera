@@ -37,18 +37,18 @@
 #include "session_manager.h"
 #include "util/tools.h"
 
-#define LOGIN_TIMEOUT 10 // in seconds
+static constexpr auto LOGIN_TIMEOUT = std::chrono::seconds(10);
 
-static time_t get_time()
+static std::chrono::seconds get_time()
 {
-    return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()).time_since_epoch().count();
+    return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()).time_since_epoch();
 }
 
 static std::string generate_token()
 {
-    const time_t expiration = get_time() + LOGIN_TIMEOUT;
+    auto expiration = get_time() + LOGIN_TIMEOUT;
     std::string salt = generateRandomId();
-    return fmt::format("{}_{}", expiration, salt);
+    return fmt::format("{}_{}", expiration.count(), salt);
 }
 
 static bool check_token(const std::string& token, const std::string& password, const std::string& encPassword)
@@ -56,7 +56,7 @@ static bool check_token(const std::string& token, const std::string& password, c
     std::vector<std::string> parts = splitString(token, '_');
     if (parts.size() != 2)
         return false;
-    auto expiration = time_t(std::stol(parts[0]));
+    auto expiration = std::chrono::seconds(std::stol(parts[0]));
     if (expiration < get_time())
         return false;
     std::string checksum = hexStringMd5(token + password);
@@ -66,7 +66,7 @@ static bool check_token(const std::string& token, const std::string& password, c
 web::auth::auth(std::shared_ptr<ContentManager> content)
     : WebRequestHandler(std::move(content))
 {
-    timeout = 60 * config->getIntOption(CFG_SERVER_UI_SESSION_TIMEOUT);
+    timeout = std::chrono::seconds(60 * config->getIntOption(CFG_SERVER_UI_SESSION_TIMEOUT));
 }
 void web::auth::process()
 {
@@ -91,7 +91,7 @@ void web::auth::process()
         ipp.append_attribute("default") = config->getIntOption(CFG_SERVER_UI_DEFAULT_ITEMS_PER_PAGE);
 
         auto menu_opts = config->getArrayOption(CFG_SERVER_UI_ITEMS_PER_PAGE_DROPDOWN);
-        for (const auto& menu_opt : menu_opts) {
+        for (auto&& menu_opt : menu_opts) {
             ipp.append_child("option").append_child(pugi::node_pcdata).set_value(menu_opt.c_str());
         }
 

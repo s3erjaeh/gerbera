@@ -43,14 +43,18 @@ class ProcessExecutor : public Executor {
 public:
     ProcessExecutor(const std::string& command,
         const std::vector<std::string>& arglist);
+    ~ProcessExecutor() override;
+
+    ProcessExecutor(const ProcessExecutor&) = delete;
+    ProcessExecutor& operator=(const ProcessExecutor&) = delete;
+
     bool isAlive() override;
     bool kill() override;
     int getStatus() override;
-    ~ProcessExecutor() override;
 
 protected:
     pid_t process_id;
-    int exit_status;
+    int exit_status { 0 };
 };
 
 #endif // __PROCESS_EXECUTOR_H__

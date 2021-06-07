@@ -36,6 +36,14 @@
 #include <iostream>
 #endif
 
+#include <upnpconfig.h>
+#ifdef UPNP_HAVE_TOOLS
+#include <upnptools.h>
+#endif
+
+#include <chrono>
+#include <thread>
+
 #include "config/config_manager.h"
 #include "content/content_manager.h"
 #include "database/database.h"
@@ -53,8 +61,8 @@
 
 Server::Server(std::shared_ptr<Config> config)
     : config(std::move(config))
+    , server_shutdown_flag(false)
 {
-    server_shutdown_flag = false;
 }
 
 void Server::init()
@@ -70,10 +78,11 @@ void Server::init()
 
     // initialize what is needed
     auto self = shared_from_this();
-    timer = std::make_shared<Timer>();
+    timer = std::make_shared<Timer>(config);
 
     clients = std::make_shared<Clients>(config);
     mime = std::make_shared<Mime>(config);
+    timer->run();
     database = Database::createInstance(config, timer);
     config->updateConfigFromDatabase(database);
     session_manager = std::make_shared<web::SessionManager>(config, timer);
@@ -86,55 +95,42 @@ Server::~Server() { log_debug("Server destroyed"); }
 
 void Server::run()
 {
-    int ret = 0; // general purpose error code
-    log_debug("start");
+    log_debug("Starting...");
+
+    // run what is needed
+    try {
+        content->run();
+    } catch (const std::runtime_error& ex) {
+        log_error("Activating ContentService failed {}", ex.what());
+        throw UpnpException(500, fmt::format("run: Activating ContentService failed {}", ex.what()));
+    }
 
     std::string iface = config->getOption(CFG_SERVER_NETWORK_INTERFACE);
-    std::string ip = config->getOption(CFG_SERVER_IP);
+    ip = config->getOption(CFG_SERVER_IP);
 
     if (!ip.empty() && !iface.empty())
-        throw_std_runtime_error("You can not specify interface and IP at the same time");
+        throw_std_runtime_error("You cannot specify interface {} and IP {} at the same time", iface, ip);
 
     if (iface.empty())
         iface = ipToInterface(ip);
 
     if (!ip.empty() && iface.empty())
-        throw_std_runtime_error("Could not find ip: {}", ip.c_str());
+        throw_std_runtime_error("Could not find IP: {}", ip.c_str());
 
-    auto port = in_port_t(config->getIntOption(CFG_SERVER_PORT));
-
-    log_info("Initialising libupnp with interface: '{}', port: {}", iface.c_str(), port);
-#if defined(USING_NPUPNP)
-    const char* IfName = iface.empty() ? "*" : iface.c_str();
-#else
-    const char* IfName = iface.empty() ? nullptr : iface.c_str();
-#endif
-    ret = UpnpInit2(IfName, port);
-    if (ret != UPNP_E_SUCCESS) {
-        throw UpnpException(ret, "run: UpnpInit failed");
-    }
-
-    port = UpnpGetServerPort();
-    log_info("Initialized port: {}", port);
-
-    if (ip.empty()) {
-        ip = UpnpGetServerIpAddress();
-    }
-
-    log_info("Server bound to: {}", ip.c_str());
-
-    virtualUrl = fmt::format("http://{}:{}/{}", ip, port, virtual_directory);
-
-    // next set webroot directory
+    // check webroot directory
     std::string web_root = config->getOption(CFG_SERVER_WEBROOT);
-
     if (web_root.empty()) {
-        throw_std_runtime_error("invalid web server root directory");
+        throw_std_runtime_error("Invalid web server root directory {}", web_root);
+    }
+
+    auto ret = startupInterface(iface, in_port_t(config->getIntOption(CFG_SERVER_PORT)));
+    if (ret != UPNP_E_SUCCESS) {
+        throw UpnpException(ret, fmt::format("run: UpnpInit failed {} {}", iface, port));
     }
 
     ret = UpnpSetWebServerRootDir(web_root.c_str());
     if (ret != UPNP_E_SUCCESS) {
-        throw UpnpException(ret, "run: UpnpSetWebServerRootDir failed");
+        throw UpnpException(ret, fmt::format("run: UpnpSetWebServerRootDir failed {}", web_root));
     }
 
     log_debug("webroot: {}", web_root.c_str());
@@ -142,7 +138,7 @@ void Server::run()
     log_debug("Setting virtual dir to: {}", virtual_directory.c_str());
     ret = UpnpAddVirtualDir(virtual_directory.c_str(), this, nullptr);
     if (ret != UPNP_E_SUCCESS) {
-        throw UpnpException(ret, "run: UpnpAddVirtualDir failed");
+        throw UpnpException(ret, fmt::format("run: UpnpAddVirtualDir failed {}", virtual_directory));
     }
 
     ret = registerVirtualDirCallbacks();
@@ -151,17 +147,7 @@ void Server::run()
         throw UpnpException(ret, "run: UpnpSetVirtualDirCallbacks failed");
     }
 
-    std::string presentationURL = config->getOption(CFG_SERVER_PRESENTATION_URL);
-    if (presentationURL.empty()) {
-        presentationURL = fmt::format("http://{}:{}/", ip, port);
-    } else {
-        std::string appendto = config->getOption(CFG_SERVER_APPEND_PRESENTATION_URL_TO);
-        if (appendto == "ip") {
-            presentationURL = fmt::format("http://{}:{}", ip, presentationURL);
-        } else if (appendto == "port") {
-            presentationURL = fmt::format("http://{}:{}/{}", ip, port, presentationURL);
-        } // else appendto is none and we take the URL as it entered by user
-    }
+    std::string presentationURL = getPresentationUrl();
 
     log_debug("Creating UpnpXMLBuilder");
     xmlbuilder = std::make_unique<UpnpXMLBuilder>(context, virtualUrl, presentationURL);
@@ -209,16 +195,69 @@ void Server::run()
     log_debug("Sending UPnP Alive advertisements every {} seconds", (aliveAdvertisementInterval / 2) - 30);
     ret = UpnpSendAdvertisement(rootDeviceHandle, aliveAdvertisementInterval);
     if (ret != UPNP_E_SUCCESS) {
-        throw UpnpException(ret, "run: UpnpSendAdvertisement failed");
+        throw UpnpException(ret, fmt::format("run: UpnpSendAdvertisement {} failed", aliveAdvertisementInterval));
     }
 
-    // run what is needed
-    content->run();
-
-    std::string url = renderWebUri(ip, port);
+    std::string url = config->getOption(CFG_VIRTUAL_URL);
+    if (url.empty()) {
+        url = renderWebUri(ip, port);
+    }
+    if (url.find("http") != 0) { // url does not start with http
+        url = fmt::format("http://{}", url);
+    }
     writeBookmark(url);
-    log_info("The Web UI can be reached by following this link: http://{}/", url);
-    log_debug("end");
+    log_info("The Web UI can be reached by following this link: {}/", url);
+}
+
+int Server::startupInterface(const std::string& iface, in_port_t inPort)
+{
+    log_info("Initialising UPnP with interface: {}, port: {}",
+        iface.empty() ? "<unset>" : iface, inPort == 0 ? "<unset>" : fmt::to_string(inPort));
+    const char* ifName = iface.empty() ? nullptr : iface.c_str();
+
+    int ret = UPNP_E_INIT_FAILED;
+    for (int attempt = 0; ret != UPNP_E_SUCCESS; attempt++) {
+        ret = UpnpInit2(ifName, inPort);
+        if (ret != UPNP_E_SUCCESS) {
+            if (attempt > 3) {
+                throw UpnpException(ret, fmt::format("run: UpnpInit failed with {} {}", ifName, inPort));
+            }
+#ifdef UPNP_HAVE_TOOLS
+            log_warning("UPnP Init {}:{} failed: {} ({}). Retrying in {} seconds...", ifName, inPort, UpnpGetErrorMessage(ret), ret, attempt + 1);
+#else
+            log_warning("UPnP Init {}:{} failed: ({}). Retrying in {} seconds...", ifName, inPort, ret, attempt + 1);
+#endif
+            std::this_thread::sleep_for(std::chrono::seconds(attempt + 1));
+        }
+    }
+
+    port = UpnpGetServerPort();
+    /* The IP libupnp picks is not always the same as passed into config, as we map it to an interface */
+    ip = UpnpGetServerIpAddress();
+
+    log_info("IPv4: Server bound to: {}:{}", ip, port);
+    log_info("IPv6: Server bound to: {}:{}", UpnpGetServerIp6Address(), UpnpGetServerPort6());
+    log_info("IPv6 ULA/GLA: Server bound to: {}:{}", UpnpGetServerUlaGuaIp6Address(), UpnpGetServerUlaGuaPort6());
+
+    virtualUrl = fmt::format("http://{}:{}/{}", ip, port, virtual_directory);
+
+    return ret;
+}
+
+std::string Server::getPresentationUrl()
+{
+    std::string presentationURL = config->getOption(CFG_SERVER_PRESENTATION_URL);
+    if (presentationURL.empty()) {
+        presentationURL = fmt::format("http://{}:{}/", ip, port);
+    } else {
+        std::string appendto = config->getOption(CFG_SERVER_APPEND_PRESENTATION_URL_TO);
+        if (appendto == "ip") {
+            presentationURL = fmt::format("http://{}:{}", ip, presentationURL);
+        } else if (appendto == "port") {
+            presentationURL = fmt::format("http://{}:{}/{}", ip, port, presentationURL);
+        } // else appendto is none and we take the URL as it entered by user
+    }
+    return presentationURL;
 }
 
 void Server::writeBookmark(const std::string& addr)
@@ -244,7 +283,7 @@ void Server::emptyBookmark()
 std::string Server::getVirtualUrl()
 {
     auto cfgVirt = config->getOption(CFG_VIRTUAL_URL);
-    return cfgVirt.empty() ? virtualUrl : cfgVirt + "/" + virtual_directory;
+    return cfgVirt.empty() ? virtualUrl : fmt::format("{}/{}", cfgVirt, virtual_directory);
 }
 
 bool Server::getShutdownStatus() const
@@ -465,9 +504,9 @@ std::unique_ptr<RequestHandler> Server::createRequestHandler(const char* filenam
 
     std::unique_ptr<RequestHandler> ret = nullptr;
 
-    if (startswith(link, std::string("/") + SERVER_VIRTUAL_DIR + "/" + CONTENT_MEDIA_HANDLER)) {
+    if (startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, CONTENT_MEDIA_HANDLER))) {
         ret = std::make_unique<FileRequestHandler>(content, xmlbuilder.get());
-    } else if (startswith(link, std::string("/") + SERVER_VIRTUAL_DIR + "/" + CONTENT_UI_HANDLER)) {
+    } else if (startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, CONTENT_UI_HANDLER))) {
         std::string parameters;
         std::string path;
         RequestHandler::splitUrl(filename, URL_UI_PARAM_SEPARATOR, path, parameters);
@@ -479,16 +518,17 @@ std::unique_ptr<RequestHandler> Server::createRequestHandler(const char* filenam
         std::string r_type = it != params.end() && !it->second.empty() ? it->second : "index";
 
         ret = web::createWebRequestHandler(content, r_type);
-    } else if (startswith(link, std::string("/") + SERVER_VIRTUAL_DIR + "/" + DEVICE_DESCRIPTION_PATH)) {
+    } else if (startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, DEVICE_DESCRIPTION_PATH))) {
         ret = std::make_unique<DeviceDescriptionHandler>(content, xmlbuilder.get());
-    } else if (startswith(link, std::string("/") + SERVER_VIRTUAL_DIR + "/" + CONTENT_SERVE_HANDLER)) {
-        if (!config->getOption(CFG_SERVER_SERVEDIR).empty())
-            ret = std::make_unique<ServeRequestHandler>(content);
-        else
+    } else if (startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, CONTENT_SERVE_HANDLER))) {
+        if (config->getOption(CFG_SERVER_SERVEDIR).empty())
             throw_std_runtime_error("Serving directories is not enabled in configuration");
+
+        ret = std::make_unique<ServeRequestHandler>(content);
     }
+
 #if defined(HAVE_CURL)
-    else if (startswith(link, std::string("/") + SERVER_VIRTUAL_DIR + "/" + CONTENT_ONLINE_HANDLER)) {
+    else if (startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, CONTENT_ONLINE_HANDLER))) {
         ret = std::make_unique<URLRequestHandler>(content);
     }
 #endif
@@ -506,7 +546,7 @@ int Server::registerVirtualDirCallbacks()
         try {
             auto reqHandler = static_cast<const Server*>(cookie)->createRequestHandler(filename);
             std::string link = urlUnescape(filename);
-            reqHandler->getInfo(link.c_str(), info);
+            reqHandler->getInfo(startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, CONTENT_UI_HANDLER)) ? filename : link.c_str(), info);
             return 0;
         } catch (const ServerShutdownException& se) {
             return -1;
@@ -526,7 +566,7 @@ int Server::registerVirtualDirCallbacks()
         try {
             auto reqHandler = static_cast<const Server*>(cookie)->createRequestHandler(filename);
             std::string link = urlUnescape(filename);
-            auto ioHandler = reqHandler->open(link.c_str(), mode);
+            auto ioHandler = reqHandler->open(startswith(link, fmt::format("/{}/{}", SERVER_VIRTUAL_DIR, CONTENT_UI_HANDLER)) ? filename : link.c_str(), mode);
             auto ioPtr = UpnpWebFileHandle(ioHandler.release());
             //log_debug("{} open({})", ioPtr, filename);
             return ioPtr;

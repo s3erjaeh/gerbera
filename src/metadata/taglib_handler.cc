@@ -90,24 +90,11 @@ void TagLibHandler::addField(metadata_fields_t field, const TagLib::File& file, 
         checkLegacy = false;
         break;
     case M_DATE:
-        i = tag->year();
-        if (i > 0) {
-            value = fmt::to_string(i);
-
-            if (!value.empty())
-                value = value + "-01-01";
-        } else
-            return;
-        break;
     case M_UPNP_DATE:
         i = tag->year();
-        if (i > 0) {
-            value = fmt::to_string(i);
-
-            if (!value.empty())
-                value = value + "-01-01";
-        } else
+        if (i == 0)
             return;
+        value = fmt::format("{}-01-01", i);
         break;
     case M_GENRE:
         val = tag->genre();
@@ -119,11 +106,10 @@ void TagLibHandler::addField(metadata_fields_t field, const TagLib::File& file, 
         break;
     case M_TRACKNUMBER:
         i = tag->track();
-        if (i > 0) {
-            value = fmt::to_string(i);
-            item->setTrackNumber(int(i));
-        } else
+        if (i == 0)
             return;
+        value = fmt::to_string(i);
+        item->setTrackNumber(int(i));
         break;
     case M_PARTNUMBER:
         list = file.properties()["DISCNUMBER"];
@@ -132,12 +118,10 @@ void TagLibHandler::addField(metadata_fields_t field, const TagLib::File& file, 
             item->setPartNumber(stoiString(value));
         } else {
             list = file.properties()["TPOS"];
-            if (!list.isEmpty()) {
-                value = list[0].toCString(true);
-                item->setPartNumber(stoiString(value));
-            } else {
+            if (list.isEmpty())
                 return;
-            }
+            value = list[0].toCString(true);
+            item->setPartNumber(stoiString(value));
         }
         break;
     case M_ALBUMARTIST:
@@ -145,37 +129,33 @@ void TagLibHandler::addField(metadata_fields_t field, const TagLib::File& file, 
         // because the latter returns incomplete properties
         // https://mail.kde.org/pipermail/taglib-devel/2015-May/002729.html
         list = file.properties()["ALBUMARTIST"];
-        if (!list.isEmpty())
-            val = list.toString(entrySeparator);
-        else
+        if (list.isEmpty())
             return;
+        val = list.toString(entrySeparator);
         break;
     case M_COMPOSER:
         list = file.properties()["COMPOSER"];
-        if (!list.isEmpty())
-            val = list.toString(entrySeparator);
-        else
+        if (list.isEmpty())
             return;
+        val = list.toString(entrySeparator);
         break;
     case M_CONDUCTOR:
         list = file.properties()["CONDUCTOR"];
-        if (!list.isEmpty())
-            val = list.toString(entrySeparator);
-        else
+        if (list.isEmpty())
             return;
+        val = list.toString(entrySeparator);
         break;
     case M_ORCHESTRA:
         list = file.properties()["ORCHESTRA"];
-        if (!list.isEmpty())
-            val = list.toString(entrySeparator);
-        else
+        if (list.isEmpty())
             return;
+        val = list.toString(entrySeparator);
         break;
     default:
         return;
     }
 
-    if ((field != M_DATE) && (field != M_TRACKNUMBER) && (field != M_PARTNUMBER)) {
+    if ((field != M_DATE) && (field != M_CREATION_DATE) && (field != M_TRACKNUMBER) && (field != M_PARTNUMBER)) {
         if (!legacyEntrySeparator.empty() && checkLegacy)
             val = val.split(legacyEntrySeparator).toString(entrySeparator);
         value = val.toCString(true);
@@ -195,8 +175,8 @@ void TagLibHandler::populateGenericTags(const std::shared_ptr<CdsItem>& item, co
         return;
 
     const TagLib::Tag* tag = file.tag();
-    for (size_t i = 0; i < mt_keys.size(); i++)
-        addField(metadata_fields_t(i), file, tag, item);
+    for (auto&& key : mt_keys)
+        addField(key.first, file, tag, item);
 
     const TagLib::AudioProperties* audioProps = file.audioProperties();
     if (!audioProps)
@@ -268,13 +248,14 @@ bool TagLibHandler::isValidArtworkContentType(const std::string& art_mimetype)
 
 std::string TagLibHandler::getContentTypeFromByteVector(const TagLib::ByteVector& data) const
 {
-    std::string art_mimetype = MIMETYPE_DEFAULT;
 #ifdef HAVE_MAGIC
-    art_mimetype = mime->bufferToMimeType(data.data(), data.size());
+    auto art_mimetype = mime->bufferToMimeType(data.data(), data.size());
     if (art_mimetype.empty())
         return MIMETYPE_DEFAULT;
-#endif
     return art_mimetype;
+#else
+    return MIMETYPE_DEFAULT;
+#endif
 }
 
 void TagLibHandler::addArtworkResource(const std::shared_ptr<CdsItem>& item, const std::string& art_mimetype)
@@ -318,8 +299,7 @@ std::unique_ptr<IOHandler> TagLibHandler::serveContent(std::shared_ptr<CdsObject
 
         auto art = dynamic_cast<TagLib::ID3v2::AttachedPictureFrame*>(list.front());
 
-        auto h = std::make_unique<MemIOHandler>(art->picture().data(), art->picture().size());
-        return h;
+        return std::make_unique<MemIOHandler>(art->picture().data(), art->picture().size());
     }
     if (content_type == CONTENT_TYPE_FLAC) {
         TagLib::FLAC::File f(&roStream, TagLib::ID3v2::FrameFactory::instance());
@@ -333,8 +313,7 @@ std::unique_ptr<IOHandler> TagLibHandler::serveContent(std::shared_ptr<CdsObject
         TagLib::FLAC::Picture* pic = f.pictureList().front();
         const TagLib::ByteVector& data = pic->data();
 
-        auto h = std::make_unique<MemIOHandler>(data.data(), data.size());
-        return h;
+        return std::make_unique<MemIOHandler>(data.data(), data.size());
     }
     if (content_type == CONTENT_TYPE_MP4) {
         TagLib::MP4::File f(&roStream);
@@ -362,8 +341,7 @@ std::unique_ptr<IOHandler> TagLibHandler::serveContent(std::shared_ptr<CdsObject
         const TagLib::MP4::CoverArt& coverArt = coverArtList.front();
         const TagLib::ByteVector& data = coverArt.data();
 
-        auto h = std::make_unique<MemIOHandler>(data.data(), data.size());
-        return h;
+        return std::make_unique<MemIOHandler>(data.data(), data.size());
     }
     if (content_type == CONTENT_TYPE_WMA) {
         TagLib::ASF::File f(&roStream);
@@ -385,8 +363,7 @@ std::unique_ptr<IOHandler> TagLibHandler::serveContent(std::shared_ptr<CdsObject
 
         const TagLib::ByteVector& data = wmpic.picture();
 
-        auto h = std::make_unique<MemIOHandler>(data.data(), data.size());
-        return h;
+        return std::make_unique<MemIOHandler>(data.data(), data.size());
     }
     if (content_type == CONTENT_TYPE_OGG) {
         TagLib::Ogg::Vorbis::File f(&roStream);
@@ -401,8 +378,7 @@ std::unique_ptr<IOHandler> TagLibHandler::serveContent(std::shared_ptr<CdsObject
         const TagLib::FLAC::Picture* pic = picList.front();
         const TagLib::ByteVector& data = pic->data();
 
-        auto h = std::make_unique<MemIOHandler>(data.data(), data.size());
-        return h;
+        return std::make_unique<MemIOHandler>(data.data(), data.size());
     }
 
     throw_std_runtime_error("Unsupported content_type: {}", content_type.c_str());
@@ -412,12 +388,16 @@ void TagLibHandler::extractMP3(TagLib::IOStream* roStream, const std::shared_ptr
 {
     TagLib::MPEG::File mp3(roStream, TagLib::ID3v2::FrameFactory::instance());
 
-    if (!mp3.isValid() || !mp3.hasID3v2Tag()) {
-        log_info("TagLibHandler {}: could not open mp3 file",
-            item->getLocation().c_str());
+    if (!mp3.isValid()) {
+        log_info("TagLibHandler {}: does not appear to be a valid mp3 file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, mp3);
+
+    if (!mp3.hasID3v2Tag()) {
+        log_debug("{}: has no IDv2 tags", item->getLocation().c_str());
+        return;
+    }
 
     auto sc = StringConverter::i2i(config);
 
@@ -426,20 +406,22 @@ void TagLibHandler::extractMP3(TagLib::IOStream* roStream, const std::shared_ptr
     bool hasTXXXFrames = frameListMap.contains("TXXX");
 
     std::vector<std::string> aux_tags_list = config->getArrayOption(CFG_IMPORT_LIBOPTS_ID3_AUXDATA_TAGS_LIST);
-    for (const auto& desiredFrame : aux_tags_list) {
-
+    for (auto&& desiredFrame : aux_tags_list) {
         if (desiredFrame.empty()) {
-        } else if (frameListMap.contains(desiredFrame.c_str())) {
+            continue;
+        }
+
+        if (frameListMap.contains(desiredFrame.c_str())) {
             const auto frameList = frameListMap[desiredFrame.c_str()];
             if (frameList.isEmpty())
                 continue;
 
             std::string value;
-            for (const auto& frame : frameList) {
+            for (auto&& frame : frameList) {
                 const auto textFrame = dynamic_cast<const TagLib::ID3v2::TextIdentificationFrame*>(frame);
                 if (textFrame == nullptr)
                     continue;
-                TagLib::String frameContents = textFrame->toString();
+                TagLib::String frameContents = textFrame->fieldList().toString(entrySeparator);
                 if (!value.empty())
                     value += entrySeparator;
                 if (!legacyEntrySeparator.empty())
@@ -456,20 +438,31 @@ void TagLibHandler::extractMP3(TagLib::IOStream* roStream, const std::shared_ptr
             if (desiredSubTag.empty())
                 continue;
 
-            for (const auto& frame : frameList) {
+            for (auto&& frame : frameList) {
                 const auto textFrame = dynamic_cast<const TagLib::ID3v2::TextIdentificationFrame*>(frame);
                 if (textFrame == nullptr)
                     continue;
-                const TagLib::String frameContents = textFrame->toString();
-                std::string value(frameContents.toCString(true));
+                std::string content;
+                std::string subTag;
+                for (auto&& field : textFrame->fieldList()) {
+                    if (subTag.empty()) {
+                        // first element is subTag name
+                        subTag = field.toCString(true);
+                    } else {
+                        content = fmt::format("{}{}{}", content, field.toCString(true), entrySeparator);
+                    }
+                }
 
-                size_t subTagEnd = value.find(']');
-                std::string subTag = value.substr(1, subTagEnd - 1); // Cut out brackets
-                std::string content = value.substr(subTagEnd + 2); // Skip bracket and space
+                // remove entrySeparator at the end again
+                if (content.length() > entrySeparator.length())
+                    content = content.substr(0, content.length() - entrySeparator.length());
                 // log_debug("TXXX Tag: {}", subTag.c_str());
 
                 if (desiredSubTag == subTag) {
-                    log_debug("Adding auxdata: {} with value {}", desiredFrame.c_str(), content.c_str());
+                    if (content.substr(0, subTag.length()) == subTag)
+                        content = content.substr(subTag.length() + 1); // Avoid leading tag for options unknown to taglib
+
+                    log_debug("Adding auxdata: '{}' with value '{}'", desiredFrame, content);
                     item->setAuxData(desiredFrame, content);
                     break;
                 }
@@ -493,11 +486,10 @@ void TagLibHandler::extractMP3(TagLib::IOStream* roStream, const std::shared_ptr
 
 void TagLibHandler::extractOgg(TagLib::IOStream* roStream, const std::shared_ptr<CdsItem>& item) const
 {
-    TagLib::Ogg::Vorbis::File vorbis(item->getLocation().c_str());
+    TagLib::Ogg::Vorbis::File vorbis(roStream);
 
     if (!vorbis.isValid()) {
-        log_info("TagLibHandler {}: could not open ogg file",
-            item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid ogg file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, vorbis);
@@ -528,8 +520,7 @@ void TagLibHandler::extractASF(TagLib::IOStream* roStream, const std::shared_ptr
     TagLib::ASF::File asf(roStream);
 
     if (!asf.isValid()) {
-        log_debug("TagLibHandler {}: could not open asf/wma file",
-            item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid asf/wma file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, asf);
@@ -565,8 +556,7 @@ void TagLibHandler::extractFLAC(TagLib::IOStream* roStream, const std::shared_pt
     TagLib::FLAC::File flac(roStream, TagLib::ID3v2::FrameFactory::instance());
 
     if (!flac.isValid()) {
-        log_info("TagLibHandler {}: could not open flac file",
-            item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid flac file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, flac);
@@ -574,7 +564,7 @@ void TagLibHandler::extractFLAC(TagLib::IOStream* roStream, const std::shared_pt
     auto sc = StringConverter::i2i(config);
 
     std::vector<std::string> aux_tags_list = config->getArrayOption(CFG_IMPORT_LIBOPTS_ID3_AUXDATA_TAGS_LIST);
-    for (const auto& desiredTag : aux_tags_list) {
+    for (auto&& desiredTag : aux_tags_list) {
 
         if (desiredTag.empty()) {
             continue;
@@ -623,8 +613,7 @@ void TagLibHandler::extractAPE(TagLib::IOStream* roStream, const std::shared_ptr
     TagLib::APE::File ape(roStream);
 
     if (!ape.isValid()) {
-        log_info("TagLibHandler {}: could not open APE file",
-            item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid APE file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, ape);
@@ -642,8 +631,7 @@ void TagLibHandler::extractWavPack(TagLib::IOStream* roStream, const std::shared
     TagLib::WavPack::File wavpack(roStream);
 
     if (!wavpack.isValid()) {
-        log_info("TagLibHandler {}: could not open WavPack file",
-            item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid WavPack file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, wavpack);
@@ -661,7 +649,7 @@ void TagLibHandler::extractMP4(TagLib::IOStream* roStream, const std::shared_ptr
     TagLib::MP4::File mp4(roStream);
 
     if (!mp4.isValid()) {
-        log_info("TagLibHandler {}: could not open mp4 file", item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid mp4 file", item->getLocation().c_str());
         return;
     }
 
@@ -704,8 +692,7 @@ void TagLibHandler::extractAiff(TagLib::IOStream* roStream, const std::shared_pt
     TagLib::RIFF::AIFF::File aiff(roStream);
 
     if (!aiff.isValid()) {
-        log_info("TagLibHandler {}: could not open AIFF file",
-            item->getLocation().c_str());
+        log_info("TagLibHandler {}: does not appear to be a valid AIFF file", item->getLocation().c_str());
         return;
     }
     populateGenericTags(item, aiff);

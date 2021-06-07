@@ -38,6 +38,7 @@
 #include "cds_objects.h"
 #include "common.h"
 #include "context.h"
+#include "util/upnp_quirks.h"
 
 class UpnpXMLBuilder {
 public:
@@ -60,7 +61,7 @@ public:
     ///
     /// This function looks at the object, and renders the DIDL-Lite representation of it -
     /// either a container or an item
-    void renderObject(const std::shared_ptr<CdsObject>& obj, size_t stringLimit, pugi::xml_node* parent);
+    void renderObject(const std::shared_ptr<CdsObject>& obj, size_t stringLimit, pugi::xml_node* parent, const std::shared_ptr<Quirks>& quirks = nullptr);
 
     /// \brief Renders XML for the event property set.
     /// \return pugi::xml_document representing the newly created XML.
@@ -105,5 +106,7 @@ protected:
     static std::unique_ptr<PathBase> getPathBase(const std::shared_ptr<CdsItem>& item, bool forceLocal = false);
     static std::string renderExtension(const std::string& contentType, const std::string& location);
     std::string getArtworkUrl(const std::shared_ptr<CdsItem>& item) const;
+    static void addField(pugi::xml_node& entry, const std::string& key, const std::string& val);
+    static metadata_fields_t remapMetaDataField(const std::string& fieldName);
 };
 #endif // __UPNP_XML_H__

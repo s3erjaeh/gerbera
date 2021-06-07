@@ -40,6 +40,16 @@ This tag defines the import section.
 
     This attribute defines if symbolic links should be treated as regular items and imported into the database (”yes”). This can cause duplicate entries if the link target is also scanned.
 
+    ::
+
+        readable-names="yes|no"
+
+    * Optional
+
+    * Default: **yes**
+
+    This attribute defines that filenames are made readable on import, i.e. underscores are replaced by space and extensions are removed. This changes the title of the entry if no metadata is available
+
 **Child tags:**
 
 ``filesystem-charset``
@@ -92,7 +102,7 @@ Below are the available scripting options:
 
     ::
 
-        <virtual-layout type="builtin">
+        <virtual-layout type="builtin" audio-layout="Default">
 
     * Optional
 
@@ -112,6 +122,22 @@ Below are the available scripting options:
         -  **js**: a user customizable javascript will be used (Gerbera must be compiled with js support)
         -  **py**: a user customizable python script will be used (Gerbera must be compiled with py support)
         -  **disabled**: only PC-Directory structure will be created, i.e. no virtual layout
+        ::
+
+            audio-layout="Default|Structured"
+            video-layout="Default"
+            image-layout="Default"
+            trailer-layout="Default"
+
+        * Optional
+        * Default: **Default**
+
+        Specifies the virtual layout to be created:
+
+        -  **Default**: `addAudio` is used to create the virtual layout
+        -  **Structured**: `addAudioStructured` is used to create the virtual layout
+
+        `video-layout`, `image-layout` and `trailer-layout` are reserved for future use.
 
         The virtual layout can be adjusted using an import script which is defined as follows:
 
@@ -123,6 +149,127 @@ Below are the available scripting options:
         * Default: ``${prefix}/share/gerbera/js/import.js``, **where ${prefix} is your installation prefix directory.**
 
         Points to the script invoked upon media import. For more details read about :ref:`scripting <scripting>`
+
+        ::
+
+            <script-options></script-options>
+
+        * Optional
+
+        Contains options to pass into scripts. All values are available in scripts as e.g.
+        `config['/import/scripting/virtual-layout/script-options/script-option'].test`.
+        For more details see :ref:`scripting <scripting>`
+
+
+        **Child tags:**
+
+            ::
+
+                <script-option name="test" value="42"/>
+
+            * Optional
+
+            Set option `value` for option `name`
+
+                ::
+
+                    name="..."
+
+                * Required
+
+                Name of the option.
+
+                ::
+
+                    to="..."
+
+                * Required
+
+                Value of the option.
+
+        ::
+
+            <genre-map></genre-map>
+
+        * Optional
+
+        Define mapping of genres to other text.
+
+
+        **Child tags:**
+
+            ::
+
+                <genre from="Disco" to="Pop"/>
+
+            * Optional
+
+            Replace genre `from` by genre `to`.
+
+                ::
+
+                    from="..."
+
+                * Required
+
+                Original genre value. Can be a regular expression.
+
+                ::
+
+                    to="..."
+
+                * Required
+
+                Target genre value.
+
+        ::
+
+            <structured-layout skip-chars="" album-box="6" artist-box="9" genre-box="6" track-box="6" div-char="-" />
+
+        * Optional
+
+        Adjust layout of boxes for large collections in structured layout. Set audio-layout to **Structured** and choose values best for your media library.
+
+            ::
+
+                div-char="-"
+
+            * Optional
+            * Default: **-**
+
+            Symbols to use around the box text.
+
+            ::
+
+                skip-chars="-"
+
+            * Optional
+
+            Special characters in the beginning of a title that are not used for building a box.
+
+            ::
+
+                album-box="6"
+                artist-box="9"
+                genre-box="6"
+                track-box="6"
+
+            * Optional
+            * Default: see above values
+
+            Type of the box. The following values are supported
+
+            -  **1**: One large box
+            -  **2**: Two boxes with 13 items each
+            -  **3**: Boxes with 8, 9, 9 letters
+            -  **4**: Boxes with 7, 6, 7, 6 letters
+            -  **5**: Boxes with 5, 5, 5, 6, 5 letters
+            -  **6**: Boxes with 4, 5, 4, 4, 5, 4 letters
+            -  **7**: Boxes with 4, 3, 4, 4, 4, 3, 4 letters
+            -  **9**: Boxes with 5, 5, 5, 4, 1, 6 letters; a large box for T
+            -  **13**: Boxes with 2 letters each
+            -  **26**: A speparate box for each letter
+
 
 ``common-script``
 ~~~~~~~~~~~~~~~~~
@@ -271,6 +418,40 @@ the removed directory if it becomes available/gets created again.
 
         Allowed values: ``yes`` or ``no``, process hidden files, overrides the hidden-files value in the ``<import/>`` tag.
 
+``system-directories``
+~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+    <system-directories>
+
+* Optional
+
+Specifies a list of system directories hidden in filesystem web ui.
+
+If the element does not exists, the default list of system directories is set to ``/bin, /boot, /dev, /etc, /lib, /lib32, /lib64, /libx32, /proc, /run, /sbin, /sys, /tmp, /usr, /var``
+
+    **Child tags:**
+
+    ::
+
+        <add-path name="/sys"/>
+
+    * Optional
+
+    Defines a system directory.
+
+    The attributes specify various options:
+
+        ::
+
+            name=...
+
+        * Required
+
+        Absolute path to the directory that shall be hidden.
+
+
 ``layout``
 ~~~~~~~~~~
 
@@ -378,6 +559,7 @@ Defines various resource options for file based resources. Older versions of Ger
         * Optional
 
         Path to the directory containing the images to load. Relative paths are assumed to be under the server's home.
+        If the image is not found in that location, it is also searched in the physical folder itself
 
         ::
 
@@ -617,7 +799,7 @@ Here is some information on the auxdata: UPnP defines certain tags to pass along
 (like title, artist, year, etc.), however some media provides more metadata and exceeds the scope of UPnP.
 This additional metadata can be used to fine tune the server layout, it allows the user to create a more
 complex container structure using a customized import script. The metadata that can be extracted depends on the
-library, currently we support **taglib** (or id3lib if absent), **ffmpeg and libexif** which provide a default set of keys 
+library, currently we support **taglib** (or id3lib if absent), **ffmpeg and libexif** and **libexiv2** (if compiled with WITH_EXIV2 enabled) which provide a default set of keys
 that can be passed in the options below. The data according to those keys will the be extracted from the media and imported 
 into the database along with the item. When processing the item, the import script will have full access to the gathered 
 metadata, thus allowing the user to organize the data with the use of the extracted information. A practical example would be: 
@@ -835,3 +1017,62 @@ A sample configuration for the example described above would be:
       </auxdata>
   </ffmpeg>
 
+``exiv2``
+----------
+
+.. code-block:: xml
+
+  <exiv2>
+
+* Optional
+
+These options apply to exiv2 libraries.
+
+**Child tags:**
+
+``auxdata``
+-----------
+
+.. code-block:: xml
+
+     <auxdata>
+
+* Optional
+
+Currently only adding keywords to auxdata is supported. `This page <https://www.exiv2.org/metadata.html>`_
+documents all of the metadata keys that exiv2 honors, depending on the format being encoded.
+
+ **Child tags:**
+
+``add-data``
+------------
+
+.. code-block:: xml
+
+    <add-data tag="Exif.Image.Model"/>
+    <add-data tag="Exif.Photo.DateTimeOriginal"/>
+    <add-data tag="Exif.Image.Orientation"/>
+    <add-data tag="Exif.Image.Rating"/>
+    <add-data tag="Xmp.xmp.Rating" />
+    <add-data tag="Xmp.dc.subject"/>
+    ...
+
+* Optional
+
+If the library was able to extract the data according to the given keyword, it will be added to auxdata.
+You can then use that data in your import scripts.
+
+A sample configuration for the example described above would be:
+
+.. code-block:: xml
+
+  <exiv2>
+      <auxdata>
+          <add-data tag="Exif.Image.Model"/>
+          <add-data tag="Exif.Photo.DateTimeOriginal"/>
+          <add-data tag="Exif.Image.Orientation"/>
+          <add-data tag="Exif.Image.Rating"/>
+          <add-data tag="Xmp.xmp.Rating" />
+          <add-data tag="Xmp.dc.subject"/>
+      </auxdata>
+  </exiv2>

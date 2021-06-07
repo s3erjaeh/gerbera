@@ -113,7 +113,7 @@ const configModeChanged = (mode) => {
       loadConfig({success: true, meta: oldMeta}, 'meta');
     })
     .catch((err) => GerberaApp.error(err));
-}
+};
 
 const loadConfig = (response, item) => {
   if (response.success && item in response && response[item]) {
@@ -158,7 +158,7 @@ const saveConfig = () => {
     };
     changedKeys.forEach((key) => {
       let i = current_config.changedItems[key];
-      if (i.item) {
+      if (i.item && i.item !== '') {
         saveData.data.push({
           item: i.item,
           id: i.id,

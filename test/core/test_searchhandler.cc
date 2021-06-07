@@ -3,7 +3,7 @@
 
   test_searchhandler.cc - this file is part of Gerbera.
 
-  Copyright (C) 2018 Gerbera Contributors
+  Copyright (C) 2018-2021 Gerbera Contributors
 
   Gerbera is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License version 2
@@ -42,6 +42,33 @@ decltype(auto) getAllTokens(const std::string& input)
     return searchTokens;
 }
 
+enum class TestCol {
+    id = 0,
+    item_id,
+    property_name,
+    property_value,
+    upnp_class,
+    ref_id,
+};
+
+const std::map<TestCol, std::pair<std::string, std::string>> testColMap = {
+    { TestCol::id, { "t", "id" } },
+    { TestCol::item_id, { "t", "item_id" } },
+    { TestCol::property_name, { "t", "property_name" } },
+    { TestCol::property_value, { "t", "property_value" } },
+    { TestCol::upnp_class, { "t", "upnp_class" } },
+    { TestCol::ref_id, { "t", "ref_id" } },
+};
+
+const std::vector<std::pair<std::string, TestCol>> testSortMap = {
+    { "id", TestCol::id },
+    { UPNP_SEARCH_ID, TestCol::item_id },
+    { META_NAME, TestCol::property_name },
+    { META_VALUE, TestCol::property_value },
+    { UPNP_SEARCH_CLASS, TestCol::upnp_class },
+    { UPNP_SEARCH_REFID, TestCol::ref_id },
+};
+
 ::testing::AssertionResult executeSearchLexerTest(const std::string& input,
     const std::vector<std::pair<std::string, TokenType>>& expectedTokens)
 {
@@ -74,6 +101,25 @@ decltype(auto) getAllTokens(const std::string& input)
             return ::testing::AssertionFailure() << "Failed to create AST";
 
         auto output = rootNode->emit();
+        if (output != expectedOutput)
+            return ::testing::AssertionFailure() << "\nExpected [" << expectedOutput << "]\nActual   [" << output << "]\n";
+
+        return ::testing::AssertionSuccess();
+    } catch (const std::runtime_error& e) {
+        return ::testing::AssertionFailure() << e.what();
+    }
+}
+
+::testing::AssertionResult executeSortParserTest(const std::string& input,
+    const std::string expectedOutput)
+{
+    try {
+        auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+        auto parser = SortParser(columnMapper, input);
+        auto output = parser.parse();
+        if (output.empty())
+            return ::testing::AssertionFailure() << "Failed to parse";
+
         if (output != expectedOutput)
             return ::testing::AssertionFailure() << "\nExpected [" << expectedOutput << "]\nActual   [" << output << "]\n";
 
@@ -266,117 +312,159 @@ TEST(SearchLexer, MultipleTokens)
 
 TEST(SearchParser, SimpleSearchCriteriaUsingEqualsOperator)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // equalsOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "dc:title=\"Hospital Roll Call\"",
-        "(m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null)"));
+        "(_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // equalsOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "upnp:album=\"Scraps At Midnight\"",
-        "(m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null)"));
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // equalsOpExpr or equalsOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "upnp:album=\"Scraps At Midnight\" or dc:title=\"Hospital Roll Call\"",
-        "(m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) or (m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null)"));
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // equalsOpExpr or equalsOpExpr or equalsOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "upnp:album=\"Scraps At Midnight\" or dc:title=\"Hospital Roll Call\" or upnp:artist=\"Deafheaven\"",
-        "(m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) or (m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Deafheaven') and c.upnp_class is not null)"));
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Deafheaven') AND _t_._upnp_class_ IS NOT NULL)"));
 }
 
 TEST(SearchParser, SearchCriteriaUsingEqualsOperatorParenthesesForSqlite)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // (equalsOpExpr)
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "(upnp:album=\"Scraps At Midnight\")",
-        "((m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null))"));
+        "((_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL))"));
 
     // (equalsOpExpr or equalsOpExpr)
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "(upnp:album=\"Scraps At Midnight\" or dc:title=\"Hospital Roll Call\")",
-        "((m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) or (m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null))"));
+        "((_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL))"));
 
     // (equalsOpExpr or equalsOpExpr) or equalsOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "(upnp:album=\"Scraps At Midnight\" or dc:title=\"Hospital Roll Call\") or upnp:artist=\"Deafheaven\"",
-        "((m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) or (m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null)) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Deafheaven') and c.upnp_class is not null)"));
+        "((_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL)) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Deafheaven') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // equalsOpExpr or (equalsOpExpr or equalsOpExpr)
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "upnp:album=\"Scraps At Midnight\" or (dc:title=\"Hospital Roll Call\" or upnp:artist=\"Deafheaven\")",
-        "(m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) or ((m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Deafheaven') and c.upnp_class is not null))"));
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) OR ((_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Deafheaven') AND _t_._upnp_class_ IS NOT NULL))"));
 
     // equalsOpExpr and (equalsOpExpr or equalsOpExpr)
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "upnp:album=\"Scraps At Midnight\" and (dc:title=\"Hospital Roll Call\" or upnp:artist=\"Deafheaven\")",
-        "(m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) and ((m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Deafheaven') and c.upnp_class is not null))"));
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) AND ((_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Deafheaven') AND _t_._upnp_class_ IS NOT NULL))"));
 
     // equalsOpExpr and (equalsOpExpr or equalsOpExpr or equalsOpExpr)
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "upnp:album=\"Scraps At Midnight\" and (dc:title=\"Hospital Roll Call\" or upnp:artist=\"Deafheaven\" or upnp:artist=\"Pavement\")",
-        "(m.property_name='upnp:album' and lower(m.property_value)=lower('Scraps At Midnight') and c.upnp_class is not null) and ((m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Deafheaven') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Pavement') and c.upnp_class is not null))"));
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Scraps At Midnight') AND _t_._upnp_class_ IS NOT NULL) AND ((_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Deafheaven') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Pavement') AND _t_._upnp_class_ IS NOT NULL))"));
 
     // (equalsOpExpr or equalsOpExpr or equalsOpExpr) and equalsOpExpr and equalsOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter,
         "(dc:title=\"Hospital Roll Call\" or upnp:artist=\"Deafheaven\" or upnp:artist=\"Pavement\") and upnp:album=\"Nevermind\" and upnp:album=\"Sunbather\"",
-        "((m.property_name='dc:title' and lower(m.property_value)=lower('Hospital Roll Call') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Deafheaven') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value)=lower('Pavement') and c.upnp_class is not null)) and (m.property_name='upnp:album' and lower(m.property_value)=lower('Nevermind') and c.upnp_class is not null) and (m.property_name='upnp:album' and lower(m.property_value)=lower('Sunbather') and c.upnp_class is not null)"));
+        "((_t_._property_name_='dc:title' AND LOWER(_t_._property_value_)=LOWER('Hospital Roll Call') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Deafheaven') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_)=LOWER('Pavement') AND _t_._upnp_class_ IS NOT NULL)) AND (_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Nevermind') AND _t_._upnp_class_ IS NOT NULL) AND (_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_)=LOWER('Sunbather') AND _t_._upnp_class_ IS NOT NULL)"));
 }
 
 TEST(SearchParser, SearchCriteriaUsingContainsOperator)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // (containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album contains \"Midnight\"", "(m.property_name='upnp:album' and lower(m.property_value) like lower('%Midnight%') and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album contains \"Midnight\"", "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_) LIKE LOWER('%Midnight%') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // (containsOpExpr or containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album contains \"Midnight\" or upnp:artist contains \"HEAVE\"", "(m.property_name='upnp:album' and lower(m.property_value) like lower('%Midnight%') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value) like lower('%HEAVE%') and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album contains \"Midnight\" OR upnp:artist contains \"HEAVE\"", 
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_) LIKE LOWER('%Midnight%') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_) LIKE LOWER('%HEAVE%') AND _t_._upnp_class_ IS NOT NULL)"));
 }
 
 TEST(SearchParser, SearchCriteriaUsingDoesNotContainOperator)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // (containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album doesnotcontain \"Midnight\"", "(m.property_name='upnp:album' and lower(m.property_value) not like lower('%Midnight%') and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album doesnotcontain \"Midnight\"",
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_) NOT LIKE LOWER('%Midnight%') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // (containsOpExpr or containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album doesNotContain \"Midnight\" or upnp:artist doesnotcontain \"HEAVE\"", "(m.property_name='upnp:album' and lower(m.property_value) not like lower('%Midnight%') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value) not like lower('%HEAVE%') and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album doesNotContain \"Midnight\" or upnp:artist doesnotcontain \"HEAVE\"",
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_) NOT LIKE LOWER('%Midnight%') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_) NOT LIKE LOWER('%HEAVE%') AND _t_._upnp_class_ IS NOT NULL)"));
 }
 
 TEST(SearchParser, SearchCriteriaUsingStartsWithOperator)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // (containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album startswith \"Midnight\"", "(m.property_name='upnp:album' and lower(m.property_value) like lower('Midnight%') and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album startswith \"Midnight\"", "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_) LIKE LOWER('Midnight%') AND _t_._upnp_class_ IS NOT NULL)"));
 
     // (containsOpExpr or containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album startsWith \"Midnight\" or upnp:artist startswith \"HEAVE\"", "(m.property_name='upnp:album' and lower(m.property_value) like lower('Midnight%') and c.upnp_class is not null) or (m.property_name='upnp:artist' and lower(m.property_value) like lower('HEAVE%') and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album startsWith \"Midnight\" or upnp:artist startswith \"HEAVE\"",
+        "(_t_._property_name_='upnp:album' AND LOWER(_t_._property_value_) LIKE LOWER('Midnight%') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND LOWER(_t_._property_value_) LIKE LOWER('HEAVE%') AND _t_._upnp_class_ IS NOT NULL)"));
 }
 
 TEST(SearchParser, SearchCriteriaUsingExistsOperator)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // (containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album exists true", "(m.property_name='upnp:album' and m.property_value is not null and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album exists true",
+        "(_t_._property_name_='upnp:album' AND _t_._property_value_ IS NOT NULL AND _t_._upnp_class_ IS NOT NULL)"));
 
     // (containsOpExpr or containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album exists true or upnp:artist exists false", "(m.property_name='upnp:album' and m.property_value is not null and c.upnp_class is not null) or (m.property_name='upnp:artist' and m.property_value is null and c.upnp_class is not null)"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:album exists true or upnp:artist exists false",
+        "(_t_._property_name_='upnp:album' AND _t_._property_value_ IS NOT NULL AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='upnp:artist' AND _t_._property_value_ IS NULL AND _t_._upnp_class_ IS NOT NULL)"));
 }
 
 TEST(SearchParser, SearchCriteriaWithExtendsOperator)
 {
-    DefaultSQLEmitter sqlEmitter;
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
     // derivedfromOpExpr
     EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:class derivedfrom \"object.item.audioItem\"",
-        "c.upnp_class like lower('object.item.audioItem.%')"));
+        "(LOWER(_t_._upnp_class_) LIKE LOWER('object.item.audioItem%'))"));
 
     // derivedfromOpExpr and (containsOpExpr or containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:class derivedfrom \"object.item.audioItem\" and (dc:title contains \"britain\" or dc:creator contains \"britain\"", "c.upnp_class like lower('object.item.audioItem.%') and ((m.property_name='dc:title' and lower(m.property_value) like lower('%britain%') and c.upnp_class is not null) or (m.property_name='dc:creator' and lower(m.property_value) like lower('%britain%') and c.upnp_class is not null))"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:class derivedfrom \"object.item.audioItem\" and (dc:title contains \"britain\" or dc:creator contains \"britain\"",
+        "(LOWER(_t_._upnp_class_) LIKE LOWER('object.item.audioItem%')) AND ((_t_._property_name_='dc:title' AND LOWER(_t_._property_value_) LIKE LOWER('%britain%') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='dc:creator' AND LOWER(_t_._property_value_) LIKE LOWER('%britain%') AND _t_._upnp_class_ IS NOT NULL))"));
 
     // derivedFromOpExpr and (containsOpExpr or containsOpExpr)
-    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:class derivedFrom \"object.item.audioItem\" and (dc:title contains \"britain\" or dc:creator contains \"britain\"", "c.upnp_class like lower('object.item.audioItem.%') and ((m.property_name='dc:title' and lower(m.property_value) like lower('%britain%') and c.upnp_class is not null) or (m.property_name='dc:creator' and lower(m.property_value) like lower('%britain%') and c.upnp_class is not null))"));
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:class derivedFrom \"object.item.audioItem\" and (dc:title contains \"britain\" or dc:creator contains \"britain\"",
+        "(LOWER(_t_._upnp_class_) LIKE LOWER('object.item.audioItem%')) AND ((_t_._property_name_='dc:title' AND LOWER(_t_._property_value_) LIKE LOWER('%britain%') AND _t_._upnp_class_ IS NOT NULL) OR (_t_._property_name_='dc:creator' AND LOWER(_t_._property_value_) LIKE LOWER('%britain%') AND _t_._upnp_class_ IS NOT NULL))"));
+}
+
+TEST(SearchParser, SearchCriteriaWindowMedia)
+{
+    auto columnMapper = std::make_shared<EnumColumnMapper<TestCol>>('_', '_', "t", "TestTable", testSortMap, testColMap);
+    DefaultSQLEmitter sqlEmitter(columnMapper, columnMapper);
+    // derivedfromOpExpr
+    EXPECT_TRUE(executeSearchParserTest(sqlEmitter, "upnp:class derivedfrom \"object.item.videoItem\" and @refID exists false",
+        "(LOWER(_t_._upnp_class_) LIKE LOWER('object.item.videoItem%')) AND (_t_._ref_id_ IS NULL)"));
+}
+
+TEST(SortParser, SortCriteria)
+{
+    EXPECT_TRUE(executeSortParserTest("+id,-name,+value",
+        "_t_._id_ ASC, _t_._property_name_ DESC, _t_._property_value_ ASC"));
+}
+
+TEST(SortParser, SortCriteriaNoDir)
+{
+    EXPECT_TRUE(executeSortParserTest("+id,name,+value",
+        "_t_._id_ ASC, _t_._property_name_ ASC, _t_._property_value_ ASC"));
+}
+
+TEST(SortParser, SortCriteriaError)
+{
+    EXPECT_TRUE(executeSortParserTest("+id,nme,+value",
+        "_t_._id_ ASC, _t_._property_value_ ASC"));
 }

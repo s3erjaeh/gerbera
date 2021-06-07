@@ -32,13 +32,13 @@
 #ifndef __IO_HANDLER_BUFFER_HELPER_H__
 #define __IO_HANDLER_BUFFER_HELPER_H__
 
-#include <condition_variable>
-#include <mutex>
-#include <pthread.h>
 #include <upnp.h>
 
 #include "common.h"
 #include "io_handler.h"
+#include "util/thread_runner.h"
+
+class Config;
 
 /// \brief a IOHandler with buffer support
 /// the buffer is only for read(). write() is not supported
@@ -51,8 +51,11 @@ public:
     /// \param initialFillSize the number of bytes which have to be in the buffer
     /// before the first read at the very beginning or after a seek returns;
     /// 0 disables the delay
-    IOHandlerBufferHelper(size_t bufSize, size_t initialFillSize);
+    IOHandlerBufferHelper(std::shared_ptr<Config> config, size_t bufSize, size_t initialFillSize);
     ~IOHandlerBufferHelper() noexcept override;
+
+    IOHandlerBufferHelper(const IOHandlerBufferHelper&) = delete;
+    IOHandlerBufferHelper& operator=(const IOHandlerBufferHelper&) = delete;
 
     // inherited from IOHandler
     void open(enum UpnpOpenFileMode mode) override;
@@ -61,6 +64,7 @@ public:
     void close() override;
 
 protected:
+    std::shared_ptr<Config> config;
     size_t bufSize;
     size_t initialFillSize;
     char* buffer;
@@ -89,11 +93,8 @@ protected:
     static void* staticThreadProc(void* arg);
     virtual void threadProc() = 0;
 
-    pthread_t bufferThread;
+    std::unique_ptr<StdThreadRunner> threadRunner;
     bool threadShutdown;
-
-    std::condition_variable cond;
-    std::mutex mutex;
 };
 
 #endif // __IO_HANDLER_BUFFER_HELPER_H__

@@ -29,12 +29,12 @@
 #include "util/tools.h"
 
 Mime::Mime(const std::shared_ptr<Config>& config)
+    : extension_map_case_sensitive(config->getBoolOption(CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_CASE_SENSITIVE))
+    , ignore_unknown_extensions(config->getBoolOption(CFG_IMPORT_MAPPINGS_IGNORE_UNKNOWN_EXTENSIONS))
 {
-    extension_map_case_sensitive = config->getBoolOption(CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_CASE_SENSITIVE);
     extension_mimetype_map = config->getDictionaryOption(CFG_IMPORT_MAPPINGS_EXTENSION_TO_MIMETYPE_LIST);
     mimetype_upnpclass_map = config->getDictionaryOption(CFG_IMPORT_MAPPINGS_MIMETYPE_TO_UPNP_CLASS_LIST);
 
-    ignore_unknown_extensions = config->getBoolOption(CFG_IMPORT_MAPPINGS_IGNORE_UNKNOWN_EXTENSIONS);
     if (ignore_unknown_extensions && (extension_mimetype_map.empty())) {
         log_warning("Ignore unknown extensions set, but no mappings specified");
         log_warning("Please review your configuration!");
@@ -60,21 +60,21 @@ Mime::Mime(const std::shared_ptr<Config>& config)
 #endif // HAVE_MAGIC
 }
 
+#ifdef HAVE_MAGIC
 Mime::~Mime()
 {
-#ifdef HAVE_MAGIC
     if (magicCookie) {
         magic_close(magicCookie);
         magicCookie = nullptr;
     }
-#endif
 }
+#endif
 
 #ifdef HAVE_MAGIC
 std::string Mime::fileToMimeType(const fs::path& path, const std::string& defval)
 {
     const char* mimeType = magic_file(magicCookie, path.c_str());
-    if (mimeType[0] == '\0') {
+    if (!mimeType || mimeType[0] == '\0') {
         return defval;
     }
 
@@ -88,18 +88,23 @@ std::string Mime::bufferToMimeType(const void* buffer, size_t length)
 }
 #endif
 
-std::string Mime::extensionToMimeType(const fs::path& path, const std::string& defval)
+std::string Mime::getMimeType(const fs::path& path, const std::string& defval)
 {
-    std::string extension = path.extension();
+    std::string extension = path.extension().string();
     if (!extension.empty())
         extension.erase(0, 1); // remove leading .
 
     if (!extension_map_case_sensitive)
         extension = toLower(extension);
 
-    std::string mimeType = getValueOrDefault(extension_mimetype_map, "");
+    std::string mimeType = getValueOrDefault(extension_mimetype_map, extension, "");
     if (mimeType.empty() && !ignore_unknown_extensions) {
+#ifdef HAVE_MAGIC
+        auto fileMime = fileToMimeType(path, defval);
+        mimeType = fileMime.empty() ? extension : fileMime;
+#else
         mimeType = defval.empty() ? extension : defval;
+#endif
     }
     return mimeType;
 }
@@ -115,13 +120,4 @@ std::string Mime::mimeTypeToUpnpClass(const std::string& mimeType)
     if (parts.size() != 2)
         return "";
     return getValueOrDefault(mimetype_upnpclass_map, parts[0] + "/*");
-}
-
-std::string Mime::getMimeType(const fs::path& path, const std::string& defval)
-{
-#ifdef HAVE_MAGIC
-    return extensionToMimeType(path, fileToMimeType(path, defval));
-#else
-    return extensionToMimeType(path, defval);
-#endif
 }

@@ -33,14 +33,13 @@
 #ifndef __SQLITE3_STORAGE_H__
 #define __SQLITE3_STORAGE_H__
 
-#include <condition_variable>
-#include <mutex>
 #include <queue>
 #include <sqlite3.h>
 #include <sstream>
 #include <unistd.h>
 
 #include "database/sql_database.h"
+#include "util/thread_runner.h"
 #include "util/timer.h"
 
 class Sqlite3Database;
@@ -50,7 +49,7 @@ class Sqlite3Result;
 class SLTask {
 public:
     /// \brief Instantiate a task
-    SLTask();
+    SLTask() = default;
 
     /// \brief run the sqlite3 task
     /// \param sl The instance of Sqlite3Database to do the queries with.
@@ -60,7 +59,7 @@ public:
     /// \return true if the task is not completed yet, false if the task is finished and the results are ready.
     bool is_running() const;
 
-    /// \brief modify the creator of the task using the supplied pthread_mutex and pthread_cond, that the task is finished
+    /// \brief notify the creator of the task using the supplied pthread_mutex and pthread_cond, that the task is finished
     void sendSignal();
 
     void sendSignal(std::string error);
@@ -74,17 +73,19 @@ public:
 
     virtual ~SLTask() = default;
 
+    virtual std::string_view taskType() const = 0;
+
 protected:
     /// \brief true as long as the task is not finished
     ///
     /// The value is set by the constructor to true and then to false be sendSignal()
-    bool running;
+    bool running { true };
 
     /// \brief true if this task has changed the db (in comparison to the backup)
-    bool contamination;
+    bool contamination { false };
 
     /// \brief true if this task has backuped the db
-    bool decontamination;
+    bool decontamination { false };
 
     std::condition_variable cond;
     std::mutex mutex;
@@ -99,6 +100,8 @@ public:
     explicit SLInitTask(std::shared_ptr<Config> config);
     void run(sqlite3** db, Sqlite3Database* sl) override;
 
+    std::string_view taskType() const override { return "InitTask"; }
+
 protected:
     std::shared_ptr<Config> config;
 };
@@ -111,6 +114,8 @@ public:
     explicit SLSelectTask(const char* query);
     void run(sqlite3** db, Sqlite3Database* sl) override;
     [[nodiscard]] std::shared_ptr<SQLResult> getResult() const { return std::static_pointer_cast<SQLResult>(pres); }
+
+    std::string_view taskType() const override { return "SelectTask"; }
 
 protected:
     /// \brief The SQL query string
@@ -128,11 +133,13 @@ public:
     void run(sqlite3** db, Sqlite3Database* sl) override;
     int getLastInsertId() const { return lastInsertId; }
 
+    std::string_view taskType() const override { return "ExecTask"; }
+
 protected:
     /// \brief The SQL query string
     const char* query;
 
-    int lastInsertId;
+    int lastInsertId {};
     bool getLastInsertIdFlag;
 };
 
@@ -142,6 +149,8 @@ public:
     /// \brief Constructor for the sqlite3 backup task
     SLBackupTask(std::shared_ptr<Config> config, bool restore);
     void run(sqlite3** db, Sqlite3Database* sl) override;
+
+    std::string_view taskType() const override { return "BackupTask"; }
 
 protected:
     std::shared_ptr<Config> config;
@@ -155,10 +164,12 @@ public:
     Sqlite3Database(std::shared_ptr<Config> config, std::shared_ptr<Timer> timer);
 
 private:
+    void prepare();
     void init() override;
     void shutdownDriver() override;
     std::shared_ptr<Database> getSelf() override;
 
+    std::string quote(std::string_view str) const override { return quote(std::string(str)); }
     std::string quote(std::string value) const override;
     std::string quote(const char* str) const override { return quote(std::string(str)); }
     std::string quote(int val) const override { return fmt::to_string(val); }
@@ -168,26 +179,27 @@ private:
     std::string quote(bool val) const override { return std::string(val ? "1" : "0"); }
     std::string quote(char val) const override { return quote(std::string(1, val)); }
     std::string quote(long long val) const override { return fmt::to_string(val); }
+
     std::shared_ptr<SQLResult> select(const char* query, int length) override;
     int exec(const char* query, int length, bool getLastInsertId = false) override;
+
+    void beginTransaction(const std::string_view& tName) override;
+    void rollback(const std::string_view& tName) override;
+    void commit(const std::string_view& tName) override;
+
     void storeInternalSetting(const std::string& key, const std::string& value) override;
 
     void _exec(const char* query);
 
     std::string startupError;
 
-    static std::string getError(const std::string& query, const std::string& error, sqlite3* db);
+    std::string getError(const std::string& query, const std::string& error, sqlite3* db, int errorCode);
 
+    std::unique_ptr<StdThreadRunner> threadRunner;
     static void* staticThreadProc(void* arg);
     void threadProc();
 
     void addTask(const std::shared_ptr<SLTask>& task, bool onlyIfDirty = false);
-
-    pthread_t sqliteThread;
-    std::condition_variable cond;
-    std::mutex sqliteMutex;
-    using AutoLock = std::lock_guard<decltype(sqliteMutex)>;
-    using AutoLockU = std::unique_lock<decltype(sqliteMutex)>;
 
     std::shared_ptr<Timer> timer;
 
@@ -196,13 +208,15 @@ private:
 
     /// \brief the tasks to be done by the sqlite3 thread
     std::queue<std::shared_ptr<SLTask>> taskQueue;
-    bool taskQueueOpen;
+    bool taskQueueOpen {};
 
     void threadCleanup() override { }
     bool threadCleanupRequired() const override { return false; }
 
     bool dirty;
     bool dbInitDone;
+    bool hasBackupTimer;
+    int sqliteStatus {};
 
     friend class SLSelectTask;
     friend class SLExecTask;
@@ -213,14 +227,17 @@ private:
 /// \brief Represents a result of a sqlite3 select
 class Sqlite3Result : public SQLResult {
 public:
-    Sqlite3Result();
+    Sqlite3Result() = default;
     ~Sqlite3Result() override;
+
+    Sqlite3Result(const Sqlite3Result&) = delete;
+    Sqlite3Result& operator=(const Sqlite3Result&) = delete;
 
 private:
     std::unique_ptr<SQLRow> nextRow() override;
     [[nodiscard]] unsigned long long getNumRows() const override { return nrow; }
 
-    char** table;
+    char** table { nullptr };
     char** row;
 
     int cur_row;

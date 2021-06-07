@@ -16,11 +16,20 @@ configure)
          --system \
          --ingroup gerbera \
          --home /var/lib/gerbera \
-         --no-create-home \
          --gecos "Gerbera Media Server" \
          --shell /usr/sbin/nologin \
          --disabled-login \
          --disabled-password \
          gerbera  >/dev/null
+    fi
+
+    # Create a config file if it isn't already there
+    if ! test -d /etc/gerbera ; then
+        mkdir /etc/gerbera
+        chown gerbera:gerbera /etc/gerbera
+    fi
+    if ! test -f /etc/gerbera/config.xml; then
+        gerbera --home /var/lib/gerbera --create-config > /etc/gerbera/config.xml
+        chown gerbera:gerbera /etc/gerbera/config.xml
     fi
 esac
