@@ -1,4 +1,4 @@
-FROM alpine:3.13 AS builder
+FROM --platform=linux/arm/v7 alpine:3.13 AS builder
 
 RUN apk add --no-cache tini gcc g++ pkgconf make \
 	util-linux-dev sqlite-dev mariadb-connector-c-dev cmake zlib-dev fmt-dev \
@@ -27,7 +27,7 @@ RUN mkdir build && \
         -DWITH_DEBUG=YES && \
     make -j$(nproc)
 
-FROM alpine:3.13
+FROM --platform=linux/arm/v7 alpine:3.13
 RUN apk add --no-cache tini util-linux sqlite mariadb-connector-c zlib fmt \
 	file libexif curl ffmpeg-libs ffmpegthumbnailer libmatroska libebml taglib \
 	pugixml spdlog sqlite-libs libupnp duktape su-exec python3 py3-pybind11 py3-pip py3-scipy py3-numpy
